@@ -459,7 +459,7 @@
                 pattern = "Spec-Out";
             } else if (jumpRatio >= 3.0 && Math.abs(delta) > Math.max(MEASUREMENT_NOISE * 2, typicalVar * 2)) {
                 pattern = "Sudden Jump";
-            } else if (isBaselineShifted || isTbiChangedSignificantly) {
+            } else if ((isTrendUp || isTrendDown) && (isBaselineShifted || isTbiChangedSignificantly)) {
                 if (baselineObj.status === 'AVAILABLE') {
                     if (isBaselineShifted) {
                         pattern = "Target Drift";
