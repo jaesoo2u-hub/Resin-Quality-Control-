@@ -335,6 +335,7 @@
         }
     };
 
+
     const TRY_GET_HISTORICAL_BASELINE = (logs) => {
         if (!logs || logs.length < 15) {
             return { status: 'UNAVAILABLE' };
@@ -352,11 +353,17 @@
         }
         const typicalVariation = validMRs.length > 0 ? (validMRs.reduce((a, b) => a + b, 0) / validMRs.length) : 0;
 
+        // 3. 안정성 검사
+        // 극단적 변동 존재 여부 (예: stdDev가 typicalVariation 대비 너무 크거나, 3시그마 벗어나는 값이 여러개)
+        const outliers = baseLogs.filter(v => Math.abs(v - mean) > 3 * stdDev).length;
+        if (outliers > 1) return { status: 'UNAVAILABLE' };
+
         const recent5 = logs.slice(-5).map(l => Number(l.value)).filter(v => !isNaN(v));
         if (recent5.length === 5) {
             const recentMean = recent5.reduce((a, b) => a + b, 0) / 5;
+            // 5. 최근 5 Batch가 Baseline보다 지나치게 이탈하는지 (오염 방지)
             if (Math.abs(recentMean - mean) > 3 * stdDev) {
-               // return { status: 'UNAVAILABLE' };
+               return { status: 'UNAVAILABLE' };
             }
         }
 
@@ -413,17 +420,34 @@
 
             let delta = previous !== null ? current - previous : 0;
 
+            // 4. Baseline 미확보 시 Typical Variation 계산 개선 (현재 Batch 제외)
             let tempMRs = [];
-            for (let i = 1; i < vals.length; i++) tempMRs.push(Math.abs(vals[i] - vals[i-1]));
-            let tempTypicalVar = tempMRs.length > 0 ? tempMRs.reduce((a,b)=>a+b,0)/tempMRs.length : 0.01;
+            const referenceVals = vals.slice(0, -1);
+            for (let i = 1; i < referenceVals.length; i++) tempMRs.push(Math.abs(referenceVals[i] - referenceVals[i-1]));
+            let tempTypicalVar = tempMRs.length > 0 ? tempMRs.reduce((a,b)=>a+b,0)/tempMRs.length : null;
 
             let typicalVar = baselineObj.status === 'AVAILABLE' ? baselineObj.typicalVariation : tempTypicalVar;
 
+            // 5. Measurement Noise: 임시 기본값이며 실제 제품별 측정 정밀도가 확보되면 대체 필요
             const MEASUREMENT_NOISE = 0.01;
-            let jumpRatio = Math.abs(delta) / Math.max(typicalVar, MEASUREMENT_NOISE);
+            let jumpRatio = 0;
+            if (typicalVar !== null) {
+                jumpRatio = Math.abs(delta) / Math.max(typicalVar, MEASUREMENT_NOISE);
+            }
 
-            let isTrendUp = recent5.length === 5 && recent5[4] > recent5[0];
-            let isTrendDown = recent5.length === 5 && recent5[4] < recent5[0];
+            // 6. Trend 방향성 판정 개선
+            let isTrendUp = false;
+            let isTrendDown = false;
+            if (recent5.length === 5) {
+                let upCount = 0, downCount = 0;
+                for (let i = 1; i < 5; i++) {
+                    if (recent5[i] > recent5[i-1]) upCount++;
+                    else if (recent5[i] < recent5[i-1]) downCount++;
+                }
+                if (upCount >= 3 && recent5[4] > recent5[0]) isTrendUp = true;
+                if (downCount >= 3 && recent5[4] < recent5[0]) isTrendDown = true;
+            }
+
             let isTbiChangedSignificantly = prev5TBI !== null && Math.abs(recent5TBI - prev5TBI) > 0.2;
             let isBaselineShifted = baselineObj.status === 'AVAILABLE' && Math.abs(recent5Mean - baselineObj.mean) > baselineObj.stdDev * 1.5;
 
@@ -492,18 +516,24 @@
                     addRec("반응기 온도 프로파일 및 승온 속도 점검");
                     addRec("촉매 투입량/투입 시점 확인");
                     addRec("반응 시간 및 종료 조건 편차 확인");
-                } else {
+                } else if (stage === 'FINAL_QC') {
                     addRec("원료 물성 변화 및 원료 LOT 이력 확인");
                     addRec("배합비 및 투입량 미세 오차 누적 점검");
+                } else {
+                    addRec("원료 특성 및 배합/투입 이력 확인");
+                    addRec("최근 공정 조건(온도/시간 등) 변경점 확인");
                 }
             } else if (pattern === "Spread Increase") {
                 decision = "🟠 반응/검사 변동요인 확인 권고";
                 if (stage === 'PROCESS') {
                     addRec("교반 RPM 및 Mixing 상태 확인");
                     addRec("온도 제어 편차 확인");
-                } else {
+                } else if (stage === 'FINAL_QC') {
                     addRec("최종 희석 공정 및 용제 투입 편차 점검");
                     addRec("샘플링 및 검사 반복성 오차 확인");
+                } else {
+                    addRec("계측기/검사 과정의 반복성 오차 확인");
+                    addRec("공정 내 변동 요인(설비, 작업자) 점검");
                 }
             } else if (pattern === "Spec Approach") {
                 decision = "🟡 Target 및 다음 Batch 집중 모니터링 권고";
