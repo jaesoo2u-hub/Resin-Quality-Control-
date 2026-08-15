@@ -738,6 +738,16 @@ ${decision}
       const [newProfileForm, setNewProfileForm] = useState({ name: '', profile: 'Target 중심 관리형', warningMargin: 15, criticalMargin: 5 });
 
       const [entries, setEntries] = useState([]);
+      const [auditLogs, setAuditLogs] = useState([]);
+
+      const [clientId, setClientId] = useState(() => {
+          let id = localStorage.getItem('qualityAppClientId');
+          if (!id) {
+              id = 'PC-' + crypto.randomUUID().substring(0, 8).toUpperCase();
+              localStorage.setItem('qualityAppClientId', id);
+          }
+          return id;
+      });
       const [expandedChart, setExpandedChart] = useState(null);
       const [chartZoom, setChartZoom] = useState({ refAreaLeft: '', refAreaRight: '', left: 'dataMin', right: 'dataMax' });
       const [showLines, setShowLines] = useState({ usl: true, lsl: true, target: true, ucl: true, lcl: true, cl: true });
@@ -855,17 +865,26 @@ ${decision}
       };
 
       const handleImportExcelData = (importMode) => {
-        const { data, mapping, duplicateCriteria } = excelState;
+        const { data, mapping, duplicateCriteria, resinColumn, selectedResin, selectedPoints } = excelState;
         if (!mapping.date) { showToast("측정일(Date) 매핑은 필수입니다."); return; }
         const entry = entries.find(en => en.id === selectedId);
         const activePoints = entry.points.map((p, i) => ({ ...p, originalIndex: i })).filter(p => p.name.trim() !== '');
         const parsedLogs = [];
 
         data.forEach((row, index) => {
+          if (resinColumn && selectedResin) {
+              const rowResin = String(row[resinColumn] || '').trim();
+              if (rowResin !== selectedResin) return;
+          }
+
           let parsedDate = parsePastedDate(String(row[mapping.date] || '')) || new Date().toISOString().split('T')[0];
           let lotNum = mapping.lotNumber ? String(row[mapping.lotNumber] || '').trim() : '';
           const valuesArr = Array(entry.points.length).fill('');
-          activePoints.forEach(p => { if (mapping.points[p.originalIndex] && row[mapping.points[p.originalIndex]] !== undefined) valuesArr[p.originalIndex] = String(row[mapping.points[p.originalIndex]]).trim(); });
+          activePoints.forEach(p => {
+              if (selectedPoints[p.originalIndex] && mapping.points[p.originalIndex] && row[mapping.points[p.originalIndex]] !== undefined) {
+                  valuesArr[p.originalIndex] = String(row[mapping.points[p.originalIndex]]).trim();
+              }
+          });
           let contentStr = mapping.content ? String(row[mapping.content] || '').trim() : '';
           if (valuesArr.every(v => v === '') && contentStr === '') return;
 
@@ -897,6 +916,10 @@ ${decision}
         }
         updateAndSync(entries.map(en => en.id === selectedId ? { ...en, logs: finalLogs } : en));
         setExcelState({ ...excelState, isOpen: false }); showToast(`${addedCount}건 반영되었습니다.`);
+        addAuditLog('EXCEL_IMPORT', {
+            productName: entry.resinName,
+            description: `모드: ${importMode}, 총 Excel 행: ${data.length}, 선택수지: ${selectedResin}, 신규 반영: ${addedCount}`
+        });
       };
 
       const showToast = (msg) => { setToastMsg(msg); setTimeout(() => setToastMsg(null), 3000); };
@@ -960,7 +983,9 @@ ${decision}
                   if (data.settings) { setAppSettings(data.settings); localStorage.setItem('qualityAppSettingsV3', JSON.stringify(data.settings)); }
                   if (data.profiles) { setProductProfiles(data.profiles); localStorage.setItem('qualityAppProfiles', JSON.stringify(data.profiles)); }
                   if (data.histories) { setAnalysisHistories(data.histories); localStorage.setItem('qualityAppHistories', JSON.stringify(data.histories)); }
-                  if (isConnected && canEdit) writeDataToFile(fileHandle, data.entries || entries, lockInfo);
+                  if (data.auditLogs) setAuditLogs(data.auditLogs);
+                  if (isConnected && canEdit) writeDataToFile(fileHandle, data.entries || entries, lockInfo, data.auditLogs || auditLogs);
+                  addAuditLog('BACKUP_RESTORE', { description: '백업 복원 (항목수: ' + (data.entries||[]).length + ')' }, data.auditLogs || auditLogs);
                   showToast("백업 데이터 복원 완료");
               } catch (err) {
                   setModalConfig({ type: 'info', message: '유효하지 않은 백업 파일 형식입니다.' });
@@ -976,9 +1001,10 @@ ${decision}
         setModalConfig({ type: 'info', message: '⚠️ 로컬 파일 접근이 제한됩니다. 브라우저 저장소(테스트 모드)로 우회합니다.' });
         setIsIframeFallback(true); setIsConnected(true);
         const fallbackText = localStorage.getItem('quality_data_fallback');
-        let data = { entries: [], lockInfo: { isEditing: false, editorName: '' } };
+        let data = { entries: [], lockInfo: { isEditing: false, editorName: '' }, auditLogs: [] };
         if (fallbackText) { try { data = JSON.parse(fallbackText); } catch(e){} }
         setEntries(data.entries || []);
+        setAuditLogs(data.auditLogs || []);
         const currentLock = data.lockInfo || { isEditing: false, editorName: '' };
         setLockInfo(currentLock);
         if (currentLock.isEditing && currentLock.editorName === userName) setCanEdit(true); else setCanEdit(false);
@@ -1001,19 +1027,44 @@ ${decision}
       const loadDataFromFile = async (handle) => {
         const file = await handle.getFile();
         const text = await file.text();
-        let data = { entries: [], lockInfo: { isEditing: false, editorName: '' } };
+        let data = { entries: [], lockInfo: { isEditing: false, editorName: '' }, auditLogs: [] };
         if (text) { try { data = JSON.parse(text); } catch(e){} }
         setEntries(data.entries || []);
+        setAuditLogs(data.auditLogs || []);
         const currentLock = data.lockInfo || { isEditing: false, editorName: '' };
         setLockInfo(currentLock);
         if (currentLock.isEditing && currentLock.editorName === userName) setCanEdit(true); else setCanEdit(false);
       };
 
-      const writeDataToFile = async (handle, dataEntries, lockData) => {
-        const contentStr = JSON.stringify({ entries: dataEntries, lockInfo: lockData }, null, 2);
+      const writeDataToFile = async (handle, dataEntries, lockData, auditData = auditLogs) => {
+        const contentStr = JSON.stringify({ entries: dataEntries, lockInfo: lockData, auditLogs: auditData }, null, 2);
         if (isIframeFallback || !handle) { localStorage.setItem('quality_data_fallback', contentStr); return; }
         const writable = await handle.createWritable();
         await writable.write(contentStr); await writable.close();
+      };
+
+
+      const addAuditLog = async (action, details, currentAuditLogs = auditLogs) => {
+          const log = {
+              id: Date.now() + Math.random().toString(36).substr(2, 9),
+              timestamp: new Date().toLocaleString('ko-KR'),
+              userName: userName || 'Unknown',
+              clientId: clientId,
+              action: action,
+              productName: details.productName || '-',
+              recordId: details.recordId || null,
+              lotNumber: details.lotNumber || '-',
+              pointName: details.pointName || '-',
+              beforeData: details.beforeData || null,
+              afterData: details.afterData || null,
+              description: details.description || ''
+          };
+          const newLogs = [log, ...currentAuditLogs].slice(0, 5000);
+          setAuditLogs(newLogs);
+          if ((isConnected && canEdit && appSettings.autoSave) || isIframeFallback) {
+              await writeDataToFile(fileHandle, entries, lockInfo, newLogs);
+          }
+          return newLogs;
       };
 
       const updateAndSync = async (updatedEntries) => {
@@ -1035,7 +1086,7 @@ ${decision}
         }
         const newLockInfo = { isEditing: true, editorName: userName, startTime: Date.now() };
         await writeDataToFile(fileHandle, currentData.entries || entries, newLockInfo);
-        setLockInfo(newLockInfo); setCanEdit(true); showToast("편집 권한을 획득했습니다.");
+        setLockInfo(newLockInfo); setCanEdit(true); showToast("편집 권한을 획득했습니다."); addAuditLog('LOCK_ACQUIRE', { description: '편집 권한 획득' }, currentData.auditLogs || auditLogs);
       };
 
       const saveAndUnlock = async (currentEntries) => {
@@ -1050,14 +1101,15 @@ ${decision}
             if (!fileHandle && !isIframeFallback) return;
             const newLockInfo = { isEditing: false, editorName: '', startTime: null };
             await writeDataToFile(fileHandle, entries, newLockInfo);
-            setLockInfo(newLockInfo); setCanEdit(false); showToast("초기화 완료"); setModalConfig({ type: null });
+            setLockInfo(newLockInfo); setCanEdit(false); showToast("초기화 완료"); setModalConfig({ type: null }); addAuditLog('LOCK_FORCE_RESET', { description: '편집 권한 강제 초기화' });
         }});
       };
 
       const handleRefresh = async () => {
          if (isIframeFallback) {
              const fallbackText = localStorage.getItem('quality_data_fallback');
-             if (fallbackText) { const data = JSON.parse(fallbackText); setEntries(data.entries || []); setLockInfo(data.lockInfo || { isEditing: false, editorName: '' }); showToast("새로고침 완료."); }
+             if (fallbackText) { const data = JSON.parse(fallbackText); setEntries(data.entries || []);
+        setAuditLogs(data.auditLogs || []); setLockInfo(data.lockInfo || { isEditing: false, editorName: '' }); showToast("새로고침 완료."); }
              return;
          }
          if (fileHandle) { await loadDataFromFile(fileHandle); showToast("데이터 갱신 완료"); }
@@ -1323,7 +1375,7 @@ ${decision}
       const handleCreate = () => {
         if (!newEntry.resinName || !newEntry.cause || !newEntry.points.some(p => p.name.trim() !== '')) return;
         const entry = { ...newEntry, id: Date.now(), status: '진행중', logs: [] };
-        updateAndSync([entry, ...entries]); setView('dashboard');
+        updateAndSync([entry, ...entries]); addAuditLog('CREATE', { productName: entry.resinName, description: '신규 품질 이력 등록 (항목 수: ' + entry.points.filter(p=>p.name).length + ')' }); setView('dashboard');
         setNewEntry({ resinName: '', type: '부적합 대책', processProfile: appSettings.defaultProfile, cause: '', startDate: new Date().toISOString().split('T')[0], endDate: '', points: [{ name: '', lsl: '', target: '', usl: '' }, { name: '', lsl: '', target: '', usl: '' }] });
       };
 
@@ -1331,6 +1383,13 @@ ${decision}
         if (newLog.values.every(v => v === '') && !newLog.content && (!newLog.images || newLog.images.length === 0)) { setModalConfig({ type: 'info', message: '최소 1개의 측정값, 내용 또는 사진을 등록하세요.' }); return; }
         const newLogWithEditor = { ...newLog, id: Date.now(), editorName: logEditorName || userName };
         updateAndSync(entries.map(entry => entry.id === selectedId ? { ...entry, logs: [...entry.logs, newLogWithEditor] } : entry));
+        const entryToAdd = entries.find(e => e.id === selectedId);
+        if (entryToAdd) {
+            addAuditLog('CREATE', {
+                productName: entryToAdd.resinName, recordId: newLogWithEditor.id, lotNumber: newLogWithEditor.lotNumber,
+                afterData: '측정일: ' + newLogWithEditor.date + '\n작성자: ' + newLogWithEditor.editorName + '\n값: ' + JSON.stringify(newLogWithEditor.values)
+            });
+        }
         const entry = entries.find(e => e.id === selectedId);
         const pointCount = entry && entry.points ? entry.points.length : 5;
         setNewLog({ date: new Date().toISOString().split('T')[0], lotNumber: '', values: Array(pointCount).fill(''), content: '', images: [] });
@@ -1340,7 +1399,12 @@ ${decision}
         let message = type === 'close' ? '종료하시겠습니까?' : type === 'delete' ? '삭제하시겠습니까?' : '재개하시겠습니까?';
         setModalConfig({ type: 'confirm', message, onConfirm: () => {
             if (type === 'close') updateAndSync(entries.map(e => e.id === targetId ? { ...e, status: '종료' } : e));
-            else if (type === 'delete') { updateAndSync(entries.filter(e => e.id !== targetId)); if (selectedId === targetId) setView('dashboard'); }
+            else if (type === 'delete') {
+                const entryToDel = entries.find(e => e.id === targetId);
+                updateAndSync(entries.filter(e => e.id !== targetId));
+                if (entryToDel) addAuditLog('DELETE', { productName: entryToDel.resinName, description: '항목 전체 삭제', beforeData: JSON.stringify({ name: entryToDel.resinName, cause: entryToDel.cause, logCount: (entryToDel.logs||[]).length }) });
+                if (selectedId === targetId) setView('dashboard');
+            }
             else if (type === 'reopen') updateAndSync(entries.map(e => e.id === targetId ? { ...e, status: '진행중' } : e));
             setModalConfig({ type: null });
         }});
@@ -1363,13 +1427,31 @@ ${decision}
         if (editingLogData.values.every(v => v === '') && !editingLogData.content && (!editingLogData.images || editingLogData.images.length === 0)) { setModalConfig({ type: 'info', message: '내용 또는 사진을 입력하세요.' }); return; }
         const upData = { ...editingLogData };
         updateAndSync(entries.map(entry => entry.id === entryId ? { ...entry, logs: entry.logs.map(l => l.id === editingLogId ? upData : l) } : entry));
+        const entryToEdit = entries.find(e => e.id === entryId);
+        const oldLog = entryToEdit ? entryToEdit.logs.find(l => l.id === editingLogId) : null;
+        if (entryToEdit && oldLog) {
+            addAuditLog('UPDATE', {
+                productName: entryToEdit.resinName, recordId: editingLogId, lotNumber: upData.lotNumber,
+                beforeData: 'LOT: ' + oldLog.lotNumber + '\n값: ' + JSON.stringify(oldLog.values) + '\n특이사항: ' + oldLog.content,
+                afterData: 'LOT: ' + upData.lotNumber + '\n값: ' + JSON.stringify(upData.values) + '\n특이사항: ' + upData.content
+            });
+        }
         setEditingLogId(null); setEditingLogData(null); showToast("기록 수정 완료");
       };
       const handleEditLogCancel = () => { setEditingLogId(null); setEditingLogData(null); };
       const handleDeleteLog = (entryId, logId) => {
         if (!canEdit) return;
         setModalConfig({ type: 'confirm', message: '기록을 삭제하시겠습니까?', onConfirm: () => {
-            updateAndSync(entries.map(entry => entry.id === entryId ? { ...entry, logs: entry.logs.filter(l => l.id !== logId) } : entry)); setModalConfig({ type: null }); showToast("삭제 완료");
+            updateAndSync(entries.map(entry => entry.id === entryId ? { ...entry, logs: entry.logs.filter(l => l.id !== logId) } : entry));
+            const entryToDel = entries.find(e => e.id === entryId);
+            const logToDel = entryToDel ? entryToDel.logs.find(l => l.id === logId) : null;
+            if (entryToDel && logToDel) {
+                addAuditLog('DELETE', {
+                    productName: entryToDel.resinName, recordId: logId, lotNumber: logToDel.lotNumber,
+                    beforeData: '측정일: ' + logToDel.date + '\nLOT: ' + logToDel.lotNumber + '\n값: ' + JSON.stringify(logToDel.values) + '\n특이사항: ' + logToDel.content
+                });
+            }
+            setModalConfig({ type: null }); showToast("삭제 완료");
         }});
       };
 
@@ -1621,7 +1703,8 @@ ${decision}
            const rawVal = l.values[currentPoint.originalIndex];
            let numVal = null;
            if (rawVal !== '' && rawVal != null) { const parsed = parseFloat(String(rawVal).trim().split(/[\s,\[\]]+/)[0]); if (!isNaN(parsed)) numVal = parsed; }
-           return { id: l.id, date: l.date, lotNumber: l.lotNumber, content: l.content, value: numVal, rawVal: rawVal, editorName: l.editorName };
+           const tbi = calculateAsymmetricTBI(numVal, currentPoint);
+           return { id: l.id, date: l.date, lotNumber: l.lotNumber, content: l.content, value: numVal, rawVal: rawVal, editorName: l.editorName, tbi: tbi !== null ? Number(tbi.toFixed(3)) : 0 };
         }).filter(l => l.value !== null);
 
         const n = chartLogs.length;
@@ -1673,7 +1756,15 @@ ${decision}
             if (isO || outlierCount > 0) { statusObj = { ...statusObj, status: '🔴 Action Required', bg: 'bg-red-50', border: 'border-red-200', color: 'text-red-700' }; }
         }
 
+                // Quality Condition KPI calcs
+        const recent5Logs = chartLogs.slice(-5).filter(l => l.tbi !== undefined && !isNaN(l.tbi));
+        const currentTBI = chartLogs.length > 0 ? chartLogs[chartLogs.length-1].tbi : 0;
+        const recent5TBIAvg = recent5Logs.length > 0 ? (recent5Logs.reduce((sum, l) => sum + l.tbi, 0) / recent5Logs.length).toFixed(3) : 0;
+        const recentDelta = chartLogs.length > 0 ? (chartLogs[chartLogs.length-1].delta || 0) : 0;
+        const recent5Sigma = mStdTrendObj.trend === '데이터 부족' ? stats.stdDev : (chartLogs[chartLogs.length-1].mStd || 0);
+
         const currentCpm = calculateCpm(stats, currentPoint ? currentPoint.target : null, currentPoint ? currentPoint.usl : null, currentPoint ? currentPoint.lsl : null);
+
 
         const handleOpenAiModal = async () => {
             setModalConfig({ type: 'ai_analysis' });
@@ -1961,60 +2052,86 @@ ${decision}
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 h-[400px] print-break-inside-avoid">
+                                        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 h-[400px] print-break-inside-avoid">
                         <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-200 h-full flex flex-col relative">
                             <div className="flex justify-between items-center mb-4 shrink-0">
-                                <h3 className="font-extrabold text-lg flex items-center gap-2 text-gray-900"><Icons.Activity /> Capability Analysis</h3>
+                                <h3 className="font-extrabold text-lg flex items-center gap-2 text-gray-900"><Icons.Activity /> 품질 상태 추세 (Quality Condition Trend)</h3>
                                 <button onClick={() => setExpandedChart({ type: 'cpk', pointIdx: activeTabIdx })} className="no-print text-xs bg-gray-100 text-gray-600 px-2 py-1.5 rounded hover:bg-gray-200"><Icons.Maximize/></button>
                             </div>
-                            <div className="flex gap-2 items-center mb-3 bg-gray-50 p-2 rounded-lg border border-gray-200 shrink-0 no-print">
-                               <span className="text-xs font-bold text-gray-600 pl-2">Window:</span>
-                               <select className="border border-gray-300 rounded outline-none text-xs px-2 py-1 focus:border-indigo-500 font-bold bg-white" value={movingWindow} onChange={e => setMovingWindow(parseInt(e.target.value))}><option value={10}>10 LOT</option><option value={20}>20 LOT</option><option value={30}>30 LOT</option><option value={50}>50 LOT</option></select>
-                               <span className="text-gray-300 mx-1">|</span>
-                               <span className="text-xs font-bold text-gray-600">보기:</span>
-                               <select className="border border-gray-300 rounded outline-none text-xs px-2 py-1 focus:border-indigo-500 font-bold bg-white" value={cpkViewMode} onChange={e => setCpkViewMode(e.target.value)}><option value="both">모두 보기</option><option value="trend">Cpk Trend 만</option><option value="moving">Moving Cpk 만</option></select>
+
+                            <div className="grid grid-cols-4 gap-2 mb-3 shrink-0 no-print">
+                                <div className="bg-gray-50 p-2 rounded border text-center">
+                                    <div className="text-[10px] font-bold text-gray-500">현재 TBI</div>
+                                    <div className={`font-black text-sm ${Math.abs(currentTBI) > 0.8 ? 'text-red-600' : 'text-indigo-600'}`}>{currentTBI > 0 ? '+' : ''}{currentTBI}</div>
+                                </div>
+                                <div className="bg-gray-50 p-2 rounded border text-center">
+                                    <div className="text-[10px] font-bold text-gray-500">최근 5 Batch TBI</div>
+                                    <div className="font-black text-sm text-indigo-800">{recent5TBIAvg > 0 ? '+' : ''}{recent5TBIAvg}</div>
+                                </div>
+                                <div className="bg-gray-50 p-2 rounded border text-center">
+                                    <div className="text-[10px] font-bold text-gray-500">최근 Batch Delta</div>
+                                    <div className={`font-black text-sm ${Math.abs(recentDelta) > (stats.stdDev*2) ? 'text-orange-500' : 'text-gray-800'}`}>{recentDelta > 0 ? '+' : ''}{recentDelta}</div>
+                                </div>
+                                <div className="bg-gray-50 p-2 rounded border text-center">
+                                    <div className="text-[10px] font-bold text-gray-500">최근 5 Batch σ</div>
+                                    <div className="font-black text-sm text-gray-800">{recent5Sigma.toFixed(4)}</div>
+                                </div>
                             </div>
+
                             <div className="flex-1 min-h-0">
-                                {chartLogs.filter(l => l.mCpk !== null || l.movingCpk !== null).length > 0 ? (
+                                {chartLogs.length > 0 ? (
                                     <ResponsiveContainer width="100%" height="100%">
-                                        <LineChart data={chartLogs} margin={{top: 10, right: 10, left: -20, bottom: 5}}>
+                                        <ComposedChart data={chartLogs} margin={{top: 10, right: 10, left: -20, bottom: 5}}>
                                             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9"/>
                                             <XAxis dataKey="date" tick={{fontSize: 11, fill: '#64748b'}} />
-                                            <YAxis domain={[0, 'auto']} tick={{fontSize: 11, fill: '#64748b'}} />
+                                            <YAxis yAxisId="left" domain={[-1.5, 1.5]} tick={{fontSize: 11, fill: '#6366f1'}} />
+                                            <YAxis yAxisId="right" orientation="right" tick={{fontSize: 11, fill: '#f59e0b'}} />
                                             <Tooltip content={<CustomCpkTooltip />} />
                                             <Legend verticalAlign="top" height={30} wrapperStyle={{ fontSize: '11px', fontWeight: 'bold' }} />
-                                            <ReferenceLine y={1.67} label={{position: 'insideTopLeft', value: '최우수(1.67)', fill: '#16a34a', fontSize: 10, fontWeight: 'bold'}} stroke="#16a34a" strokeDasharray="3 3" />
-                                            <ReferenceLine y={1.33} label={{position: 'insideTopLeft', value: 'Target(1.33)', fill: '#22c55e', fontSize: 10, fontWeight: 'bold'}} stroke="#22c55e" strokeDasharray="3 3" />
-                                            <ReferenceLine y={1.0} label={{position: 'insideBottomLeft', value: '경고(1.0)', fill: '#f97316', fontSize: 10, fontWeight: 'bold'}} stroke="#f97316" strokeDasharray="3 3" />
-                                            {(cpkViewMode === 'both' || cpkViewMode === 'trend') && <Line type="monotone" dataKey="mCpk" stroke="#6366f1" strokeWidth={2} dot={{r:2, fill:"#6366f1"}} activeDot={{ r: 5 }} name="Cpk Trend (단기)" connectNulls isAnimationActive={false}/>}
-                                            {(cpkViewMode === 'both' || cpkViewMode === 'moving') && <Line type="monotone" dataKey="movingCpk" stroke="#ec4899" strokeWidth={3} dot={{r:3, fill:"#ec4899"}} activeDot={{ r: 6 }} name={`Moving Cpk (${movingWindow} LOT)`} connectNulls isAnimationActive={false}/>}
-                                        </LineChart>
+                                            <ReferenceLine yAxisId="left" y={1.0} stroke="#ef4444" strokeDasharray="3 3" />
+                                            <ReferenceLine yAxisId="left" y={-1.0} stroke="#ef4444" strokeDasharray="3 3" />
+                                            <ReferenceLine yAxisId="left" y={0} stroke="#10b981" strokeWidth={2} />
+
+                                            <Bar yAxisId="left" dataKey="tbi" name="Target 편향 추세 (TBI)" fill="#818cf8" barSize={10} isAnimationActive={false}>
+                                                {chartLogs.map((entry, index) => (
+                                                    <Cell key={`cell-${index}`} fill={Math.abs(entry.tbi) > 1.0 ? '#ef4444' : Math.abs(entry.tbi) > 0.8 ? '#f59e0b' : '#818cf8'} />
+                                                ))}
+                                            </Bar>
+                                            <Line yAxisId="right" type="monotone" dataKey="delta" stroke="#f59e0b" strokeWidth={2} dot={{r:3}} name="Batch 간 변화량 (Delta)" connectNulls isAnimationActive={false}/>
+                                        </ComposedChart>
                                     </ResponsiveContainer>
                                 ) : (
                                     <div className="flex items-center justify-center h-full text-sm text-gray-400 bg-gray-50 rounded-xl border border-dashed border-gray-200">데이터가 부족합니다.</div>
                                 )}
                             </div>
+                            <div className="text-[10px] text-gray-400 text-right mt-1 shrink-0 no-print">통계 참고 | Cpk {cpk > 0 ? cpk : '-'} | Cpm {currentCpm !== null ? currentCpm : '-'}</div>
                         </div>
 
                         <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-200 h-full flex flex-col relative">
                             <div className="flex justify-between items-center mb-2 shrink-0">
-                                <h3 className="font-extrabold text-lg flex items-center gap-2 text-gray-900"><Icons.NormalCurve /> 공정 분포도 (Distribution)</h3>
+                                <h3 className="font-extrabold text-lg flex items-center gap-2 text-gray-900"><Icons.NormalCurve /> Batch 실측 분포</h3>
                                 <button onClick={() => setExpandedChart({ type: 'area', pointIdx: activeTabIdx })} className="no-print text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded hover:bg-gray-200"><Icons.Maximize/></button>
                             </div>
                             <div className="flex-1 min-h-0 mt-2">
                               {n > 1 ? (
                                 <ResponsiveContainer width="100%" height="100%">
-                                  <AreaChart data={generateNormalDistData(stats, currentPoint && currentPoint.lsl, currentPoint && currentPoint.target, currentPoint && currentPoint.usl)}>
+                                  <ScatterChart margin={{ top: 20, right: 20, bottom: 20, left: 20 }}>
                                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9"/>
-                                    <XAxis dataKey="x" type="number" domain={['dataMin', 'dataMax']} tick={{fontSize: 11, fill: '#64748b'}} tickFormatter={(val) => val.toFixed(2)} />
-                                    <YAxis hide={true} />
-                                    <Tooltip labelFormatter={(val) => `측정값: ${Number(val).toFixed(2)}`} formatter={(val) => [Number(val).toFixed(4), '확률밀도']} />
-                                    {currentPoint && currentPoint.usl && <ReferenceLine x={parseFloat(currentPoint.usl)} label={{position: 'insideTopLeft', value: `USL: ${currentPoint.usl}`, fill: '#991b1b', fontSize: 11, fontWeight: 'bold'}} stroke="#991b1b" strokeDasharray="3 3" />}
-                                    {currentPoint && currentPoint.lsl && <ReferenceLine x={parseFloat(currentPoint.lsl)} label={{position: 'insideTopRight', value: `LSL: ${currentPoint.lsl}`, fill: '#991b1b', fontSize: 11, fontWeight: 'bold'}} stroke="#991b1b" strokeDasharray="3 3" />}
-                                    {currentPoint && currentPoint.target && <ReferenceLine x={parseFloat(currentPoint.target)} label={{position: 'insideTopLeft', value: `Target: ${currentPoint.target}`, fill: '#16a34a', fontSize: 11, fontWeight: 'bold'}} stroke="#16a34a" strokeDasharray="5 5" />}
-                                    <ReferenceLine x={stats.mean} label={{position: 'insideBottomRight', value: `CL: ${stats.mean.toFixed(2)}`, fill: '#1e293b', fontSize: 11, fontWeight: 'bold'}} stroke="#1e293b" strokeDasharray="3 3" />
-                                    <Area type="monotone" dataKey="y" stroke="#6366f1" fill="#818cf8" fillOpacity={0.4} name="확률밀도" isAnimationActive={false}/>
-                                  </AreaChart>
+                                    <XAxis type="category" dataKey="date" name="측정일" tick={{fontSize: 10, fill: '#64748b'}} angle={-45} textAnchor="end" height={60} />
+                                    <YAxis type="number" dataKey="value" name="측정값" domain={yDomain} tick={{fontSize: 11, fill: '#64748b'}} />
+                                    <Tooltip cursor={{strokeDasharray: '3 3'}} content={<CustomSpcTooltip />} />
+
+                                    {currentPoint && currentPoint.usl && <ReferenceLine y={parseFloat(currentPoint.usl)} label={{position: 'insideTopLeft', value: `USL: ${currentPoint.usl}`, fill: '#991b1b', fontSize: 11, fontWeight: 'bold'}} stroke="#991b1b" strokeDasharray="3 3" />}
+                                    {currentPoint && currentPoint.lsl && <ReferenceLine y={parseFloat(currentPoint.lsl)} label={{position: 'insideTopRight', value: `LSL: ${currentPoint.lsl}`, fill: '#991b1b', fontSize: 11, fontWeight: 'bold'}} stroke="#991b1b" strokeDasharray="3 3" />}
+                                    {currentPoint && currentPoint.target && <ReferenceLine y={parseFloat(currentPoint.target)} label={{position: 'insideTopLeft', value: `Target: ${currentPoint.target}`, fill: '#16a34a', fontSize: 11, fontWeight: 'bold'}} stroke="#16a34a" strokeDasharray="5 5" />}
+                                    <ReferenceLine y={stats.mean} label={{position: 'insideBottomRight', value: `Mean: ${stats.mean.toFixed(2)}`, fill: '#1e293b', fontSize: 11, fontWeight: 'bold'}} stroke="#1e293b" strokeDasharray="3 3" />
+
+                                    <Scatter name="실측값" data={chartLogs} fill="#6366f1">
+                                        {chartLogs.map((entry, index) => (
+                                            <Cell key={`cell-${index}`} fill={entry.isOutlier ? '#ef4444' : '#6366f1'} />
+                                        ))}
+                                    </Scatter>
+                                  </ScatterChart>
                                 </ResponsiveContainer>
                               ) : (
                                 <div className="flex items-center justify-center h-full text-sm text-gray-400 bg-gray-50 rounded-xl border border-dashed border-gray-200">데이터가 2개 이상 필요합니다.</div>
@@ -2234,61 +2351,156 @@ ${decision}
           else setExcelState({ ...excelState, mapping: { ...excelState.mapping, [field]: val } });
         };
 
+        const togglePointSelection = (idx) => {
+            setExcelState(prev => ({...prev, selectedPoints: {...prev.selectedPoints, [idx]: !prev.selectedPoints[idx]}}));
+        };
+
+        let totalValidRows = 0;
+        let expectedNewRows = 0;
+        let expectedDupRows = 0;
+
+        if (excelState.resinColumn && excelState.selectedResin && excelState.data) {
+             const existingLogs = entry.logs || [];
+             excelState.data.forEach(row => {
+                 if (String(row[excelState.resinColumn] || '').trim() !== excelState.selectedResin) return;
+                 let parsedDate = parsePastedDate(String(row[excelState.mapping.date] || '')) || new Date().toISOString().split('T')[0];
+                 let lotNum = excelState.mapping.lotNumber ? String(row[excelState.mapping.lotNumber] || '').trim() : '';
+
+                 const valuesArr = Array(entry.points.length).fill('');
+                 activePoints.forEach(p => {
+                     if (excelState.selectedPoints[p.originalIndex] && excelState.mapping.points[p.originalIndex] && row[excelState.mapping.points[p.originalIndex]] !== undefined) {
+                         valuesArr[p.originalIndex] = String(row[excelState.mapping.points[p.originalIndex]]).trim();
+                     }
+                 });
+                 let contentStr = excelState.mapping.content ? String(row[excelState.mapping.content] || '').trim() : '';
+                 if (valuesArr.every(v => v === '') && contentStr === '') return;
+
+                 totalValidRows++;
+                 let isDup = existingLogs.some(existingLog => {
+                      if (excelState.duplicateCriteria === 'date_lot') return existingLog.date === parsedDate && existingLog.lotNumber === lotNum;
+                      if (excelState.duplicateCriteria === 'date') return existingLog.date === parsedDate;
+                      return existingLog.lotNumber === lotNum;
+                  });
+                 if(isDup) expectedDupRows++; else expectedNewRows++;
+             });
+        } else if (!excelState.resinColumn) {
+             totalValidRows = excelState.data.length;
+             expectedNewRows = totalValidRows;
+        }
+
         return (
           <div className="fixed inset-0 bg-gray-900/60 flex items-center justify-center z-[140] backdrop-blur-sm p-4 no-print">
-            <div className="bg-white rounded-2xl shadow-xl w-full max-w-3xl overflow-hidden border border-gray-100">
-              <div className="px-6 py-4 border-b bg-gray-50 flex justify-between items-center">
-                <h3 className="text-lg font-bold flex items-center gap-2 text-gray-800"><Icons.FileSpreadsheet/> 엑셀 데이터 매핑</h3>
+            <div className="bg-white rounded-2xl shadow-xl w-full max-w-4xl max-h-[90vh] overflow-y-auto border border-gray-100 flex flex-col">
+              <div className="px-6 py-4 border-b bg-gray-50 flex justify-between items-center sticky top-0 z-10">
+                <h3 className="text-lg font-bold flex items-center gap-2 text-gray-800"><Icons.FileSpreadsheet/> 엑셀 데이터 필터 & 매핑</h3>
                 <button onClick={() => setExcelState({...excelState, isOpen: false})} className="text-gray-400 hover:text-gray-600"><Icons.X /></button>
               </div>
               <div className="p-6 space-y-6">
-                <div className="text-sm text-gray-600 bg-indigo-50 p-4 rounded-lg border border-indigo-100">
-                  <p>업로드한 엑셀 파일에서 <b>총 {excelState.data.length}건</b>의 행이 발견되었습니다.</p>
-                  <p className="mt-1">시스템의 각 입력 필드와 엑셀의 헤더(열 이름)를 알맞게 짝지어주세요.</p>
+
+                <div className="bg-blue-50 p-5 rounded-lg border border-blue-100 space-y-4">
+                   <h4 className="font-bold text-blue-900 text-base">Step 1. 수지(제품) 및 항목 선택</h4>
+                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                       <div className="bg-white p-3 rounded border shadow-sm">
+                           <label className="block text-sm font-bold text-gray-700 mb-1">수지명 컬럼</label>
+                           {excelState.resinColumn ? (
+                               <div className="text-sm text-green-700 font-bold bg-green-50 p-2 rounded">자동 인식됨: {excelState.resinColumn}</div>
+                           ) : (
+                               <select className="w-full border p-2 rounded outline-none font-medium text-sm" value={excelState.resinColumn} onChange={e => {
+                                   const col = e.target.value;
+                                   const resins = [...new Set(excelState.data.map(r => String(r[col]||'').trim()).filter(Boolean))];
+                                   setExcelState({...excelState, resinColumn: col, availableResins: resins});
+                               }}>
+                                  <option value="">-- 직접 선택 --</option>
+                                  {options.map((opt, i) => <option key={i} value={opt.value}>{opt.label}</option>)}
+                               </select>
+                           )}
+                           {excelState.resinColumn && (
+                               <div className="mt-3">
+                                   <label className="block text-sm font-bold text-gray-700 mb-1">가져올 수지 선택</label>
+                                   <select className="w-full border p-2 rounded outline-none font-bold text-indigo-700 text-sm" value={excelState.selectedResin} onChange={e => setExcelState({...excelState, selectedResin: e.target.value})}>
+                                      <option value="">-- 선택하세요 --</option>
+                                      {excelState.availableResins.map((r, i) => <option key={i} value={r}>{r}</option>)}
+                                   </select>
+                                   {!excelState.selectedResin && <div className="text-red-500 text-xs mt-1 font-bold">선택한 수지의 데이터가 없습니다.</div>}
+                               </div>
+                           )}
+                           {!excelState.resinColumn && <div className="text-red-500 text-xs mt-1 font-bold">Excel에서 수지명/제품명 컬럼을 찾지 못했습니다. 직접 컬럼을 선택하십시오.</div>}
+                       </div>
+
+                       <div className="bg-white p-3 rounded border shadow-sm">
+                           <label className="block text-sm font-bold text-gray-700 mb-2">가져올 검사 항목 선택</label>
+                           <div className="space-y-2">
+                               {activePoints.map((p, idx) => (
+                                   <label key={idx} className="flex items-center gap-2 cursor-pointer p-1 hover:bg-gray-50 rounded">
+                                       <input type="checkbox" className="w-4 h-4 accent-indigo-600" checked={!!excelState.selectedPoints[p.originalIndex]} onChange={() => togglePointSelection(p.originalIndex)} />
+                                       <span className="text-sm font-bold text-gray-800">{p.name}</span>
+                                   </label>
+                               ))}
+                           </div>
+                           {Object.values(excelState.selectedPoints).every(v=>!v) && <div className="text-red-500 text-xs mt-2 font-bold">선택한 수지에 해당 검사 항목 데이터가 없습니다. (최소 1개 선택)</div>}
+                       </div>
+                   </div>
                 </div>
-                <div className="grid grid-cols-2 gap-x-6 gap-y-4">
-                  <div className="bg-gray-50 p-3 rounded-lg border">
-                    <label className="block text-sm font-bold text-gray-700 mb-1">측정일 (필수)</label>
-                    <select className="w-full border p-2 rounded outline-none bg-white font-medium" value={excelState.mapping.date} onChange={e => handleMapChange('date', e.target.value)}>
-                      {options.map((opt, i) => <option key={i} value={opt.value}>{opt.label}</option>)}
-                    </select>
-                  </div>
-                  <div className="bg-gray-50 p-3 rounded-lg border">
-                    <label className="block text-sm font-bold text-gray-700 mb-1">LOT 번호</label>
-                    <select className="w-full border p-2 rounded outline-none bg-white font-medium" value={excelState.mapping.lotNumber} onChange={e => handleMapChange('lotNumber', e.target.value)}>
-                      {options.map((opt, i) => <option key={i} value={opt.value}>{opt.label}</option>)}
-                    </select>
-                  </div>
-                  {activePoints.map((p, idx) => (
-                    <div key={idx} className="bg-gray-50 p-3 rounded-lg border">
-                      <label className="block text-sm font-bold text-gray-700 mb-1">항목: {p.name}</label>
-                      <select className="w-full border p-2 rounded outline-none bg-white font-medium" value={excelState.mapping.points[p.originalIndex] || ''} onChange={e => handleMapChange('points', e.target.value, p.originalIndex)}>
-                        {options.map((opt, i) => <option key={i} value={opt.value}>{opt.label}</option>)}
-                      </select>
+
+                <div className="bg-white p-5 rounded-lg border border-gray-200 space-y-4">
+                    <h4 className="font-bold text-gray-800 text-base border-b pb-2">Step 2. 데이터 컬럼 매핑 (자동 매핑 확인)</h4>
+                    <div className="grid grid-cols-2 lg:grid-cols-3 gap-x-4 gap-y-4">
+                      <div className="bg-gray-50 p-2 rounded border">
+                        <label className="block text-xs font-bold text-gray-700 mb-1">측정일 (필수)</label>
+                        <select className="w-full border p-1 rounded outline-none bg-white font-medium text-xs" value={excelState.mapping.date} onChange={e => handleMapChange('date', e.target.value)}>
+                          {options.map((opt, i) => <option key={i} value={opt.value}>{opt.label}</option>)}
+                        </select>
+                      </div>
+                      <div className="bg-gray-50 p-2 rounded border">
+                        <label className="block text-xs font-bold text-gray-700 mb-1">LOT 번호</label>
+                        <select className="w-full border p-1 rounded outline-none bg-white font-medium text-xs" value={excelState.mapping.lotNumber} onChange={e => handleMapChange('lotNumber', e.target.value)}>
+                          {options.map((opt, i) => <option key={i} value={opt.value}>{opt.label}</option>)}
+                        </select>
+                      </div>
+                      {activePoints.map((p, idx) => (
+                        <div key={idx} className={`p-2 rounded border ${excelState.selectedPoints[p.originalIndex] ? 'bg-indigo-50 border-indigo-200' : 'bg-gray-50 opacity-50'}`}>
+                          <label className="block text-xs font-bold text-gray-700 mb-1">항목: {p.name}</label>
+                          <select className="w-full border p-1 rounded outline-none bg-white font-medium text-xs" value={excelState.mapping.points[p.originalIndex] || ''} onChange={e => handleMapChange('points', e.target.value, p.originalIndex)} disabled={!excelState.selectedPoints[p.originalIndex]}>
+                            {options.map((opt, i) => <option key={i} value={opt.value}>{opt.label}</option>)}
+                          </select>
+                        </div>
+                      ))}
+                      <div className="bg-gray-50 p-2 rounded border col-span-1 lg:col-span-3">
+                        <label className="block text-xs font-bold text-gray-700 mb-1">조치 및 특이사항</label>
+                        <select className="w-full border p-1 rounded outline-none bg-white font-medium text-xs" value={excelState.mapping.content} onChange={e => handleMapChange('content', e.target.value)}>
+                          {options.map((opt, i) => <option key={i} value={opt.value}>{opt.label}</option>)}
+                        </select>
+                      </div>
                     </div>
-                  ))}
-                  <div className="bg-gray-50 p-3 rounded-lg border col-span-1 md:col-span-2">
-                    <label className="block text-sm font-bold text-gray-700 mb-1">조치 및 특이사항</label>
-                    <select className="w-full border p-2 rounded outline-none bg-white font-medium" value={excelState.mapping.content} onChange={e => handleMapChange('content', e.target.value)}>
-                      {options.map((opt, i) => <option key={i} value={opt.value}>{opt.label}</option>)}
-                    </select>
-                  </div>
-                  <div className="bg-indigo-50 p-3 rounded-lg border border-indigo-200 col-span-1 md:col-span-2 mt-2">
-                    <label className="block text-sm font-bold text-indigo-800 mb-1">이어서 추가 시, 데이터 중복 확인 기준</label>
-                    <select className="w-full border p-2 rounded outline-none bg-white text-sm font-medium" value={excelState.duplicateCriteria} onChange={e => setExcelState({...excelState, duplicateCriteria: e.target.value})}>
-                      <option value="date_lot">측정일 + LOT 번호가 일치하면 중복 (권장)</option>
-                      <option value="date">측정일만 일치해도 중복으로 간주</option>
-                      <option value="lot">LOT 번호만 일치해도 중복으로 간주</option>
-                    </select>
-                  </div>
                 </div>
-                <div className="flex flex-col md:flex-row justify-between items-center gap-3 pt-4 border-t">
-                  <button onClick={() => setExcelState({...excelState, isOpen: false})} className="w-full md:w-auto px-5 py-2.5 text-gray-600 font-bold bg-gray-100 hover:bg-gray-200 rounded-lg order-2 md:order-1">취소</button>
-                  <div className="flex flex-col md:flex-row gap-2 w-full md:w-auto order-1 md:order-2">
-                    <button onClick={() => handleImportExcelData('overwrite')} className="px-4 py-2.5 bg-red-50 text-red-600 border border-red-200 font-bold rounded-lg hover:bg-red-100 flex items-center justify-center gap-1 text-sm shadow-sm transition-colors"><Icons.RefreshCw /> <span>기존 삭제 후 덮어쓰기</span></button>
-                    <button onClick={() => handleImportExcelData('append_unique')} className="px-4 py-2.5 bg-indigo-600 text-white font-bold rounded-lg hover:bg-indigo-700 flex items-center justify-center gap-1 text-sm shadow-sm transition-colors"><Icons.Upload /> <span>중복 제외하고 추가</span></button>
-                  </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="bg-gray-800 text-white p-5 rounded-lg border border-gray-700 space-y-2">
+                        <h4 className="font-bold text-lg border-b border-gray-600 pb-2 mb-3">미리보기 (Preview)</h4>
+                        <div className="flex justify-between text-sm"><span>전체 Excel 행:</span> <span className="font-bold">{excelState.data.length}</span></div>
+                        <div className="flex justify-between text-sm"><span>선택 수지:</span> <span className="font-bold text-indigo-300">{excelState.selectedResin || '-'}</span></div>
+                        <div className="flex justify-between text-sm"><span>선택 항목:</span> <span className="font-bold text-indigo-300">{activePoints.filter(p=>excelState.selectedPoints[p.originalIndex]).map(p=>p.name).join(', ') || '-'}</span></div>
+                        <div className="flex justify-between text-sm"><span>유효 데이터:</span> <span className="font-bold">{totalValidRows}</span></div>
+                        <div className="flex justify-between text-sm"><span>중복 예상:</span> <span className="font-bold text-orange-400">{expectedDupRows}</span></div>
+                        <div className="flex justify-between text-sm pt-2 border-t border-gray-600"><span>신규 반영(예상):</span> <span className="font-bold text-green-400 text-lg">{expectedNewRows}</span></div>
+                    </div>
+
+                    <div className="flex flex-col justify-end space-y-4">
+                        <div className="bg-indigo-50 p-3 rounded-lg border border-indigo-200">
+                          <label className="block text-sm font-bold text-indigo-800 mb-1">데이터 중복 확인 기준</label>
+                          <select className="w-full border p-2 rounded outline-none bg-white text-sm font-medium" value={excelState.duplicateCriteria} onChange={e => setExcelState({...excelState, duplicateCriteria: e.target.value})}>
+                            <option value="date_lot">측정일 + LOT 번호가 일치하면 중복 (권장)</option>
+                            <option value="date">측정일만 일치해도 중복으로 간주</option>
+                            <option value="lot">LOT 번호만 일치해도 중복으로 간주</option>
+                          </select>
+                        </div>
+                        <div className="flex gap-2">
+                          <button onClick={() => handleImportExcelData('overwrite')} className="flex-1 py-3 bg-red-50 text-red-600 border border-red-200 font-bold rounded-lg hover:bg-red-100 flex items-center justify-center gap-1 text-sm shadow-sm transition-colors"><Icons.RefreshCw /> <span>덮어쓰기</span></button>
+                          <button onClick={() => handleImportExcelData('append_unique')} disabled={expectedNewRows===0} className="flex-1 py-3 bg-indigo-600 text-white font-bold rounded-lg hover:bg-indigo-700 flex items-center justify-center gap-1 text-sm shadow-sm transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"><Icons.Upload /> <span>{expectedNewRows>0 ? '가져오기' : '반영할 데이터 없음'}</span></button>
+                        </div>
+                    </div>
                 </div>
+
               </div>
             </div>
           </div>
@@ -2354,7 +2566,8 @@ ${decision}
            let rawVal = (l.values && Array.isArray(l.values)) ? l.values[currentPoint.originalIndex] : null;
            let numVal = null;
            if (rawVal !== '' && rawVal != null) { const parsed = parseFloat(String(rawVal).trim().split(/[\s,\[\]]+/)[0]); if (!isNaN(parsed)) numVal = parsed; }
-           return { id: l.id, date: l.date, lotNumber: l.lotNumber, content: l.content, value: numVal, rawVal: rawVal, editorName: l.editorName };
+           const tbi = calculateAsymmetricTBI(numVal, currentPoint);
+           return { id: l.id, date: l.date, lotNumber: l.lotNumber, content: l.content, value: numVal, rawVal: rawVal, editorName: l.editorName, tbi: tbi !== null ? Number(tbi.toFixed(3)) : 0 };
         }).filter(l => l.value !== null) : [];
 
         const n = chartLogs.length;
