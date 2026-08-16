@@ -2465,6 +2465,10 @@ ${decision}
                   {expandedChart.type === 'multi' && <Fragment><Icons.Layers/> 통합 관리도</Fragment>}
                 </h3>
                 <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-2 bg-indigo-50 px-3 py-1.5 rounded-full border border-indigo-100 shadow-sm cursor-pointer hover:bg-indigo-100 transition-colors" onClick={() => setShowGuide(!showGuide)}>
+                      <Icons.FileText />
+                      <span className="text-xs font-bold text-indigo-800">해석 가이드 {showGuide ? '닫기' : '보기'}</span>
+                  </div>
                   {(expandedChart.type === 'line' || expandedChart.type === 'cpk') && chartZoom.left !== 'dataMin' && (
                      <button onClick={handleZoomOut} className="px-3 py-1.5 bg-red-50 text-red-600 border border-red-200 rounded-lg hover:bg-red-100 font-bold text-sm shadow-sm transition-colors">Zoom 초기화</button>
                   )}
@@ -2592,6 +2596,7 @@ ${decision}
                   </Fragment>
                 )}
               </div>
+              {renderChartGuide(expandedChart.type)}
             </div>
           </div>
         );
