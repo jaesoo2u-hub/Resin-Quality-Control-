@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html lang="ko">
-<head><script>window.addEventListener("unhandledrejection", (e) => console.error("PROMISE REJECTION: " + e.reason));</script><script>window.onerror = function(m,u,l,c,e) { console.error("GLOBAL ERROR: " + m + " at " + l + ":" + c); }; window.addEventListener("error", (e) => console.error("REACT ERROR: " + e.error.stack));</script>
+<head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>합성수지 품질 이력 관리 (V3 + 사진 첨부)</title>
@@ -674,11 +674,6 @@ ${decision}
         return null;
     };
 
-    class ErrorBoundary extends React.Component {
-      constructor(props) { super(props); this.state = { hasError: false, error: null }; }
-      static getDerivedStateFromError(error) { return { hasError: true, error }; }
-      render() { if (this.state.hasError) return <div className="p-10 text-red-500 font-bold" id="error-screen">{this.state.error.toString()}</div>; return this.props.children; }
-    }
     function QualityHistoryApp() {
       const [view, setView] = useState('dashboard');
       const [selectedId, setSelectedId] = useState(null);
@@ -743,16 +738,6 @@ ${decision}
       const [newProfileForm, setNewProfileForm] = useState({ name: '', profile: 'Target 중심 관리형', warningMargin: 15, criticalMargin: 5 });
 
       const [entries, setEntries] = useState([]);
-      const [auditLogs, setAuditLogs] = useState([]);
-
-      const [clientId, setClientId] = useState(() => {
-          let id = localStorage.getItem('qualityAppClientId');
-          if (!id) {
-              id = 'PC-' + crypto.randomUUID().substring(0, 8).toUpperCase();
-              localStorage.setItem('qualityAppClientId', id);
-          }
-          return id;
-      });
       const [expandedChart, setExpandedChart] = useState(null);
       const [chartZoom, setChartZoom] = useState({ refAreaLeft: '', refAreaRight: '', left: 'dataMin', right: 'dataMax' });
       const [showLines, setShowLines] = useState({ usl: true, lsl: true, target: true, ucl: true, lcl: true, cl: true });
@@ -870,26 +855,17 @@ ${decision}
       };
 
       const handleImportExcelData = (importMode) => {
-        const { data, mapping, duplicateCriteria, resinColumn, selectedResin, selectedPoints } = excelState;
+        const { data, mapping, duplicateCriteria } = excelState;
         if (!mapping.date) { showToast("측정일(Date) 매핑은 필수입니다."); return; }
         const entry = entries.find(en => en.id === selectedId);
         const activePoints = (entry.points || []).map((p, i) => ({ ...p, originalIndex: i })).filter(p => p.name.trim() !== '');
         const parsedLogs = [];
 
         data.forEach((row, index) => {
-          if (resinColumn && selectedResin) {
-              const rowResin = String(row[resinColumn] || '').trim();
-              if (rowResin !== selectedResin) return;
-          }
-
           let parsedDate = parsePastedDate(String(row[mapping.date] || '')) || new Date().toISOString().split('T')[0];
           let lotNum = mapping.lotNumber ? String(row[mapping.lotNumber] || '').trim() : '';
           const valuesArr = Array(entry.points.length).fill('');
-          activePoints.forEach(p => {
-              if (selectedPoints[p.originalIndex] && mapping.points[p.originalIndex] && row[mapping.points[p.originalIndex]] !== undefined) {
-                  valuesArr[p.originalIndex] = String(row[mapping.points[p.originalIndex]]).trim();
-              }
-          });
+          activePoints.forEach(p => { if (mapping.points[p.originalIndex] && row[mapping.points[p.originalIndex]] !== undefined) valuesArr[p.originalIndex] = String(row[mapping.points[p.originalIndex]]).trim(); });
           let contentStr = mapping.content ? String(row[mapping.content] || '').trim() : '';
           if (valuesArr.every(v => v === '') && contentStr === '') return;
 
@@ -921,10 +897,6 @@ ${decision}
         }
         updateAndSync(entries.map(en => en.id === selectedId ? { ...en, logs: finalLogs } : en));
         setExcelState({ ...excelState, isOpen: false }); showToast(`${addedCount}건 반영되었습니다.`);
-        addAuditLog('EXCEL_IMPORT', {
-            productName: entry.resinName,
-            description: `모드: ${importMode}, 총 Excel 행: ${data.length}, 선택수지: ${selectedResin}, 신규 반영: ${addedCount}`
-        });
       };
 
       const showToast = (msg) => { setToastMsg(msg); setTimeout(() => setToastMsg(null), 3000); };
@@ -988,9 +960,7 @@ ${decision}
                   if (data.settings) { setAppSettings(data.settings); localStorage.setItem('qualityAppSettingsV3', JSON.stringify(data.settings)); }
                   if (data.profiles) { setProductProfiles(data.profiles); localStorage.setItem('qualityAppProfiles', JSON.stringify(data.profiles)); }
                   if (data.histories) { setAnalysisHistories(data.histories); localStorage.setItem('qualityAppHistories', JSON.stringify(data.histories)); }
-                  if (data.auditLogs) setAuditLogs(data.auditLogs);
-                  if (isConnected && canEdit) writeDataToFile(fileHandle, data.entries || entries, lockInfo, data.auditLogs || auditLogs);
-                  addAuditLog('BACKUP_RESTORE', { description: '백업 복원 (항목수: ' + (data.entries||[]).length + ')' }, data.auditLogs || auditLogs);
+                  if (isConnected && canEdit) writeDataToFile(fileHandle, data.entries || entries, lockInfo);
                   showToast("백업 데이터 복원 완료");
               } catch (err) {
                   setModalConfig({ type: 'info', message: '유효하지 않은 백업 파일 형식입니다.' });
@@ -1006,10 +976,9 @@ ${decision}
         setModalConfig({ type: 'info', message: '⚠️ 로컬 파일 접근이 제한됩니다. 브라우저 저장소(테스트 모드)로 우회합니다.' });
         setIsIframeFallback(true); setIsConnected(true);
         const fallbackText = localStorage.getItem('quality_data_fallback');
-        let data = { entries: [], lockInfo: { isEditing: false, editorName: '' }, auditLogs: [] };
+        let data = { entries: [], lockInfo: { isEditing: false, editorName: '' } };
         if (fallbackText) { try { data = JSON.parse(fallbackText); } catch(e){} }
         setEntries(data.entries || []);
-        setAuditLogs(data.auditLogs || []);
         const currentLock = data.lockInfo || { isEditing: false, editorName: '' };
         setLockInfo(currentLock);
         if (currentLock.isEditing && currentLock.editorName === userName) setCanEdit(true); else setCanEdit(false);
@@ -1032,44 +1001,19 @@ ${decision}
       const loadDataFromFile = async (handle) => {
         const file = await handle.getFile();
         const text = await file.text();
-        let data = { entries: [], lockInfo: { isEditing: false, editorName: '' }, auditLogs: [] };
+        let data = { entries: [], lockInfo: { isEditing: false, editorName: '' } };
         if (text) { try { data = JSON.parse(text); } catch(e){} }
         setEntries(data.entries || []);
-        setAuditLogs(data.auditLogs || []);
         const currentLock = data.lockInfo || { isEditing: false, editorName: '' };
         setLockInfo(currentLock);
         if (currentLock.isEditing && currentLock.editorName === userName) setCanEdit(true); else setCanEdit(false);
       };
 
-      const writeDataToFile = async (handle, dataEntries, lockData, auditData = auditLogs) => {
-        const contentStr = JSON.stringify({ entries: dataEntries, lockInfo: lockData, auditLogs: auditData }, null, 2);
+      const writeDataToFile = async (handle, dataEntries, lockData) => {
+        const contentStr = JSON.stringify({ entries: dataEntries, lockInfo: lockData }, null, 2);
         if (isIframeFallback || !handle) { localStorage.setItem('quality_data_fallback', contentStr); return; }
         const writable = await handle.createWritable();
         await writable.write(contentStr); await writable.close();
-      };
-
-
-      const addAuditLog = async (action, details, currentAuditLogs = auditLogs) => {
-          const log = {
-              id: Date.now() + Math.random().toString(36).substr(2, 9),
-              timestamp: new Date().toLocaleString('ko-KR'),
-              userName: userName || 'Unknown',
-              clientId: clientId,
-              action: action,
-              productName: details.productName || '-',
-              recordId: details.recordId || null,
-              lotNumber: details.lotNumber || '-',
-              pointName: details.pointName || '-',
-              beforeData: details.beforeData || null,
-              afterData: details.afterData || null,
-              description: details.description || ''
-          };
-          const newLogs = [log, ...currentAuditLogs].slice(0, 5000);
-          setAuditLogs(newLogs);
-          if ((isConnected && canEdit && appSettings.autoSave) || isIframeFallback) {
-              await writeDataToFile(fileHandle, entries, lockInfo, newLogs);
-          }
-          return newLogs;
       };
 
       const updateAndSync = async (updatedEntries) => {
@@ -1091,7 +1035,7 @@ ${decision}
         }
         const newLockInfo = { isEditing: true, editorName: userName, startTime: Date.now() };
         await writeDataToFile(fileHandle, currentData.entries || entries, newLockInfo);
-        setLockInfo(newLockInfo); setCanEdit(true); showToast("편집 권한을 획득했습니다."); addAuditLog('LOCK_ACQUIRE', { description: '편집 권한 획득' }, currentData.auditLogs || auditLogs);
+        setLockInfo(newLockInfo); setCanEdit(true); showToast("편집 권한을 획득했습니다.");
       };
 
       const saveAndUnlock = async (currentEntries) => {
@@ -1106,15 +1050,14 @@ ${decision}
             if (!fileHandle && !isIframeFallback) return;
             const newLockInfo = { isEditing: false, editorName: '', startTime: null };
             await writeDataToFile(fileHandle, entries, newLockInfo);
-            setLockInfo(newLockInfo); setCanEdit(false); showToast("초기화 완료"); setModalConfig({ type: null }); addAuditLog('LOCK_FORCE_RESET', { description: '편집 권한 강제 초기화' });
+            setLockInfo(newLockInfo); setCanEdit(false); showToast("초기화 완료"); setModalConfig({ type: null });
         }});
       };
 
       const handleRefresh = async () => {
          if (isIframeFallback) {
              const fallbackText = localStorage.getItem('quality_data_fallback');
-             if (fallbackText) { const data = JSON.parse(fallbackText); setEntries(data.entries || []);
-        setAuditLogs(data.auditLogs || []); setLockInfo(data.lockInfo || { isEditing: false, editorName: '' }); showToast("새로고침 완료."); }
+             if (fallbackText) { const data = JSON.parse(fallbackText); setEntries(data.entries || []); setLockInfo(data.lockInfo || { isEditing: false, editorName: '' }); showToast("새로고침 완료."); }
              return;
          }
          if (fileHandle) { await loadDataFromFile(fileHandle); showToast("데이터 갱신 완료"); }
@@ -1231,9 +1174,6 @@ ${decision}
               </div>
 
               <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 flex flex-col gap-4">
-                <button onClick={() => setView('audit')} className="w-full py-3 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-lg font-bold flex items-center justify-center gap-2 text-sm shadow border border-gray-300 mb-4">
-        <Icons.Activity/> 시스템 데이터 변경 이력 (Audit Log) 보기
-    </button>
                 <h3 className="font-bold text-lg text-gray-800 flex items-center gap-2"><span className="material-symbols-outlined">save</span> 데이터 백업 및 복원</h3>
                 <p className="text-xs text-gray-500">현재 입력된 모든 데이터, 설정, 프로파일, 이력을 백업하거나 기존 백업 파일을 복원합니다.</p>
                 <div className="flex gap-2">
@@ -1383,7 +1323,7 @@ ${decision}
       const handleCreate = () => {
         if (!newEntry.resinName || !newEntry.cause || !newEntry.points.some(p => p.name.trim() !== '')) return;
         const entry = { ...newEntry, id: Date.now(), status: '진행중', logs: [] };
-        updateAndSync([entry, ...entries]); addAuditLog('CREATE', { productName: entry.resinName, description: '신규 품질 이력 등록 (항목 수: ' + (entry.points || []).filter(p=>p.name).length + ')' }); setView('dashboard');
+        updateAndSync([entry, ...entries]); setView('dashboard');
         setNewEntry({ resinName: '', type: '부적합 대책', processProfile: appSettings.defaultProfile, cause: '', startDate: new Date().toISOString().split('T')[0], endDate: '', points: [{ name: '', lsl: '', target: '', usl: '' }, { name: '', lsl: '', target: '', usl: '' }] });
       };
 
@@ -1391,13 +1331,6 @@ ${decision}
         if (newLog.values.every(v => v === '') && !newLog.content && (!newLog.images || newLog.images.length === 0)) { setModalConfig({ type: 'info', message: '최소 1개의 측정값, 내용 또는 사진을 등록하세요.' }); return; }
         const newLogWithEditor = { ...newLog, id: Date.now(), editorName: logEditorName || userName };
         updateAndSync(entries.map(entry => entry.id === selectedId ? { ...entry, logs: [...entry.logs, newLogWithEditor] } : entry));
-        const entryToAdd = entries.find(e => e.id === selectedId);
-        if (entryToAdd) {
-            addAuditLog('CREATE', {
-                productName: entryToAdd.resinName, recordId: newLogWithEditor.id, lotNumber: newLogWithEditor.lotNumber,
-                afterData: '측정일: ' + newLogWithEditor.date + '\n작성자: ' + newLogWithEditor.editorName + '\n값: ' + JSON.stringify(newLogWithEditor.values)
-            });
-        }
         const entry = entries.find(e => e.id === selectedId);
         const pointCount = entry && entry.points ? entry.points.length : 5;
         setNewLog({ date: new Date().toISOString().split('T')[0], lotNumber: '', values: Array(pointCount).fill(''), content: '', images: [] });
@@ -1407,12 +1340,7 @@ ${decision}
         let message = type === 'close' ? '종료하시겠습니까?' : type === 'delete' ? '삭제하시겠습니까?' : '재개하시겠습니까?';
         setModalConfig({ type: 'confirm', message, onConfirm: () => {
             if (type === 'close') updateAndSync(entries.map(e => e.id === targetId ? { ...e, status: '종료' } : e));
-            else if (type === 'delete') {
-                const entryToDel = entries.find(e => e.id === targetId);
-                updateAndSync(entries.filter(e => e.id !== targetId));
-                if (entryToDel) addAuditLog('DELETE', { productName: entryToDel.resinName, description: '항목 전체 삭제', beforeData: JSON.stringify({ name: entryToDel.resinName, cause: entryToDel.cause, logCount: (entryToDel.logs||[]).length }) });
-                if (selectedId === targetId) setView('dashboard');
-            }
+            else if (type === 'delete') { updateAndSync(entries.filter(e => e.id !== targetId)); if (selectedId === targetId) setView('dashboard'); }
             else if (type === 'reopen') updateAndSync(entries.map(e => e.id === targetId ? { ...e, status: '진행중' } : e));
             setModalConfig({ type: null });
         }});
@@ -1435,31 +1363,13 @@ ${decision}
         if (editingLogData.values.every(v => v === '') && !editingLogData.content && (!editingLogData.images || editingLogData.images.length === 0)) { setModalConfig({ type: 'info', message: '내용 또는 사진을 입력하세요.' }); return; }
         const upData = { ...editingLogData };
         updateAndSync(entries.map(entry => entry.id === entryId ? { ...entry, logs: (entry.logs || []).map(l => l.id === editingLogId ? upData : l) } : entry));
-        const entryToEdit = entries.find(e => e.id === entryId);
-        const oldLog = entryToEdit ? entryToEdit.logs.find(l => l.id === editingLogId) : null;
-        if (entryToEdit && oldLog) {
-            addAuditLog('UPDATE', {
-                productName: entryToEdit.resinName, recordId: editingLogId, lotNumber: upData.lotNumber,
-                beforeData: 'LOT: ' + oldLog.lotNumber + '\n값: ' + JSON.stringify(oldLog.values) + '\n특이사항: ' + oldLog.content,
-                afterData: 'LOT: ' + upData.lotNumber + '\n값: ' + JSON.stringify(upData.values) + '\n특이사항: ' + upData.content
-            });
-        }
         setEditingLogId(null); setEditingLogData(null); showToast("기록 수정 완료");
       };
       const handleEditLogCancel = () => { setEditingLogId(null); setEditingLogData(null); };
       const handleDeleteLog = (entryId, logId) => {
         if (!canEdit) return;
         setModalConfig({ type: 'confirm', message: '기록을 삭제하시겠습니까?', onConfirm: () => {
-            updateAndSync(entries.map(entry => entry.id === entryId ? { ...entry, logs: (entry.logs || []).filter(l => l.id !== logId) } : entry));
-            const entryToDel = entries.find(e => e.id === entryId);
-            const logToDel = entryToDel ? entryToDel.logs.find(l => l.id === logId) : null;
-            if (entryToDel && logToDel) {
-                addAuditLog('DELETE', {
-                    productName: entryToDel.resinName, recordId: logId, lotNumber: logToDel.lotNumber,
-                    beforeData: '측정일: ' + logToDel.date + '\nLOT: ' + logToDel.lotNumber + '\n값: ' + JSON.stringify(logToDel.values) + '\n특이사항: ' + logToDel.content
-                });
-            }
-            setModalConfig({ type: null }); showToast("삭제 완료");
+            updateAndSync(entries.map(entry => entry.id === entryId ? { ...entry, logs: (entry.logs || []).filter(l => l.id !== logId) } : entry)); setModalConfig({ type: null }); showToast("삭제 완료");
         }});
       };
 
@@ -1545,7 +1455,7 @@ ${decision}
                <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex flex-col justify-center">
                   <p className="text-xs font-bold text-gray-500 mb-1">최근 측정 / 저장</p>
                   <p className="text-sm font-black text-gray-800">{latestDate || '-'}</p>
-                  <p className="text-xs font-medium text-indigo-600 mt-1">오늘 AI 분석: {(analysisHistories || []).filter(h=>h.date===new Date().toISOString().split('T')[0]).length}건</p>
+                  <p className="text-xs font-medium text-indigo-600 mt-1">오늘 AI 분석: {analysisHistories.filter(h=>h.date===new Date().toISOString().split('T')[0]).length}건</p>
                </div>
             </div>
          );
@@ -1620,7 +1530,7 @@ ${decision}
                 }
 
                 return (
-                  <div key={entry.id} onClick={() => { console.log('CARD CLICKED', entry.id); setSelectedId(entry.id); setView('details'); setActiveTabIdx(0); setAiAnalysis(null); }} className={`p-5 rounded-xl border-2 cursor-pointer transition-all hover:shadow-lg relative group flex flex-col bg-white/95 backdrop-blur-sm ${entry.status === '종료' ? 'border-gray-200 bg-gray-100 opacity-80' : cardColor}`}>
+                  <div key={entry.id} onClick={() => { setSelectedId(entry.id); setView('details'); setActiveTabIdx(0); setAiAnalysis(null); }} className={`p-5 rounded-xl border-2 cursor-pointer transition-all hover:shadow-lg relative group flex flex-col bg-white/95 backdrop-blur-sm ${entry.status === '종료' ? 'border-gray-200 bg-gray-100 opacity-80' : cardColor}`}>
                     <div className="flex justify-between items-start mb-2 pr-6"><span className={`px-2 py-1 rounded-full text-xs font-bold ${entry.type === '부적합 대책' ? 'bg-red-100 text-red-600' : 'bg-white text-gray-800 shadow-sm border'}`}>{entry.type}</span><span className={`flex items-center gap-1 text-sm font-semibold ${entry.status === '종료' ? 'text-gray-500' : 'text-gray-900'}`}>{entry.status === '종료' ? <Icons.CheckCircle/> : <Icons.Activity/>} {entry.status}</span></div>
                     <h3 className="text-xl font-black text-gray-900 mb-1">{entry.resinName}</h3>
                     <p className="text-sm text-gray-600 mb-4 truncate">{entry.cause}</p>
@@ -1669,9 +1579,9 @@ ${decision}
                        </tr>
                     </thead>
                     <tbody>
-                       {(analysisHistories || []).length === 0 ? (
+                       {analysisHistories.length === 0 ? (
                            <tr><td colSpan="8" className="p-10 text-center text-gray-500">저장된 분석 이력이 없습니다. 상세 화면에서 AI 분석 후 저장하세요.</td></tr>
-                       ) : [...(analysisHistories || [])].sort((a,b)=>new Date(b.date)-new Date(a.date)).map((h, i) => (
+                       ) : [...analysisHistories].sort((a,b)=>new Date(b.date)-new Date(a.date)).map((h, i) => (
                            <tr key={i} className="border-b hover:bg-indigo-50/50">
                                <td className="p-4 text-center">
                                    <div className="flex flex-col gap-1 items-center">
@@ -1687,7 +1597,7 @@ ${decision}
                                <td className="p-4 text-center font-medium">{h.psi}점</td>
                                <td className="p-4 text-center">
                                   <button onClick={() => { setModalConfig({type:'ai_analysis_result', message: h.fullReport})}} className="text-xs bg-indigo-100 text-indigo-700 px-3 py-1.5 rounded hover:bg-indigo-200 mr-2 font-bold">리포트 보기</button>
-                                  <button onClick={() => { const up = (analysisHistories || []).filter(x=>x.id!==h.id); setAnalysisHistories(up); localStorage.setItem('qualityAppHistories', JSON.stringify(up)); }} className="text-red-400 hover:text-red-600"><Icons.Trash2/></button>
+                                  <button onClick={() => { const up = analysisHistories.filter(x=>x.id!==h.id); setAnalysisHistories(up); localStorage.setItem('qualityAppHistories', JSON.stringify(up)); }} className="text-red-400 hover:text-red-600"><Icons.Trash2/></button>
                                </td>
                            </tr>
                        ))}
@@ -1712,8 +1622,7 @@ ${decision}
            const rawVal = l.values[currentPoint.originalIndex];
            let numVal = null;
            if (rawVal !== '' && rawVal != null) { const parsed = parseFloat(String(rawVal).trim().split(/[\s,\[\]]+/)[0]); if (!isNaN(parsed)) numVal = parsed; }
-           const tbi = calculateAsymmetricTBI(numVal, currentPoint);
-           return { id: l.id, date: l.date, lotNumber: l.lotNumber, content: l.content, value: numVal, rawVal: rawVal, editorName: l.editorName, tbi: tbi !== null ? Number(tbi.toFixed(3)) : 0 };
+           return { id: l.id, date: l.date, lotNumber: l.lotNumber, content: l.content, value: numVal, rawVal: rawVal, editorName: l.editorName };
         }).filter(l => l.value !== null);
 
         const n = chartLogs.length;
@@ -1765,15 +1674,7 @@ ${decision}
             if (isO || outlierCount > 0) { statusObj = { ...statusObj, status: '🔴 Action Required', bg: 'bg-red-50', border: 'border-red-200', color: 'text-red-700' }; }
         }
 
-                // Quality Condition KPI calcs
-        const recent5Logs = chartLogs.slice(-5).filter(l => l.tbi !== undefined && !isNaN(l.tbi));
-        const currentTBI = chartLogs.length > 0 ? chartLogs[chartLogs.length-1].tbi : 0;
-        const recent5TBIAvg = recent5Logs.length > 0 ? (recent5Logs.reduce((sum, l) => sum + l.tbi, 0) / recent5Logs.length).toFixed(3) : 0;
-        const recentDelta = chartLogs.length > 0 ? (chartLogs[chartLogs.length-1].delta || 0) : 0;
-        const recent5Sigma = mStdTrendObj.trend === '데이터 부족' ? stats.stdDev : (chartLogs[chartLogs.length-1].mStd || 0);
-
         const currentCpm = calculateCpm(stats, currentPoint ? currentPoint.target : null, currentPoint ? currentPoint.usl : null, currentPoint ? currentPoint.lsl : null);
-
 
         const handleOpenAiModal = async () => {
             setModalConfig({ type: 'ai_analysis' });
@@ -2334,156 +2235,61 @@ ${decision}
           else setExcelState({ ...excelState, mapping: { ...excelState.mapping, [field]: val } });
         };
 
-        const togglePointSelection = (idx) => {
-            setExcelState(prev => ({...prev, selectedPoints: {...prev.selectedPoints, [idx]: !prev.selectedPoints[idx]}}));
-        };
-
-        let totalValidRows = 0;
-        let expectedNewRows = 0;
-        let expectedDupRows = 0;
-
-        if (excelState.resinColumn && excelState.selectedResin && excelState.data) {
-             const existingLogs = entry.logs || [];
-             excelState.data.forEach(row => {
-                 if (String(row[excelState.resinColumn] || '').trim() !== excelState.selectedResin) return;
-                 let parsedDate = parsePastedDate(String(row[excelState.mapping.date] || '')) || new Date().toISOString().split('T')[0];
-                 let lotNum = excelState.mapping.lotNumber ? String(row[excelState.mapping.lotNumber] || '').trim() : '';
-
-                 const valuesArr = Array(entry.points.length).fill('');
-                 activePoints.forEach(p => {
-                     if (excelState.selectedPoints[p.originalIndex] && excelState.mapping.points[p.originalIndex] && row[excelState.mapping.points[p.originalIndex]] !== undefined) {
-                         valuesArr[p.originalIndex] = String(row[excelState.mapping.points[p.originalIndex]]).trim();
-                     }
-                 });
-                 let contentStr = excelState.mapping.content ? String(row[excelState.mapping.content] || '').trim() : '';
-                 if (valuesArr.every(v => v === '') && contentStr === '') return;
-
-                 totalValidRows++;
-                 let isDup = existingLogs.some(existingLog => {
-                      if (excelState.duplicateCriteria === 'date_lot') return existingLog.date === parsedDate && existingLog.lotNumber === lotNum;
-                      if (excelState.duplicateCriteria === 'date') return existingLog.date === parsedDate;
-                      return existingLog.lotNumber === lotNum;
-                  });
-                 if(isDup) expectedDupRows++; else expectedNewRows++;
-             });
-        } else if (!excelState.resinColumn) {
-             totalValidRows = excelState.data.length;
-             expectedNewRows = totalValidRows;
-        }
-
         return (
           <div className="fixed inset-0 bg-gray-900/60 flex items-center justify-center z-[140] backdrop-blur-sm p-4 no-print">
-            <div className="bg-white rounded-2xl shadow-xl w-full max-w-4xl max-h-[90vh] overflow-y-auto border border-gray-100 flex flex-col">
-              <div className="px-6 py-4 border-b bg-gray-50 flex justify-between items-center sticky top-0 z-10">
-                <h3 className="text-lg font-bold flex items-center gap-2 text-gray-800"><Icons.FileSpreadsheet/> 엑셀 데이터 필터 & 매핑</h3>
+            <div className="bg-white rounded-2xl shadow-xl w-full max-w-3xl overflow-hidden border border-gray-100">
+              <div className="px-6 py-4 border-b bg-gray-50 flex justify-between items-center">
+                <h3 className="text-lg font-bold flex items-center gap-2 text-gray-800"><Icons.FileSpreadsheet/> 엑셀 데이터 매핑</h3>
                 <button onClick={() => setExcelState({...excelState, isOpen: false})} className="text-gray-400 hover:text-gray-600"><Icons.X /></button>
               </div>
               <div className="p-6 space-y-6">
-
-                <div className="bg-blue-50 p-5 rounded-lg border border-blue-100 space-y-4">
-                   <h4 className="font-bold text-blue-900 text-base">Step 1. 수지(제품) 및 항목 선택</h4>
-                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                       <div className="bg-white p-3 rounded border shadow-sm">
-                           <label className="block text-sm font-bold text-gray-700 mb-1">수지명 컬럼</label>
-                           {excelState.resinColumn ? (
-                               <div className="text-sm text-green-700 font-bold bg-green-50 p-2 rounded">자동 인식됨: {excelState.resinColumn}</div>
-                           ) : (
-                               <select className="w-full border p-2 rounded outline-none font-medium text-sm" value={excelState.resinColumn} onChange={e => {
-                                   const col = e.target.value;
-                                   const resins = [...new Set(excelState.data.map(r => String(r[col]||'').trim()).filter(Boolean))];
-                                   setExcelState({...excelState, resinColumn: col, availableResins: resins});
-                               }}>
-                                  <option value="">-- 직접 선택 --</option>
-                                  {options.map((opt, i) => <option key={i} value={opt.value}>{opt.label}</option>)}
-                               </select>
-                           )}
-                           {excelState.resinColumn && (
-                               <div className="mt-3">
-                                   <label className="block text-sm font-bold text-gray-700 mb-1">가져올 수지 선택</label>
-                                   <select className="w-full border p-2 rounded outline-none font-bold text-indigo-700 text-sm" value={excelState.selectedResin} onChange={e => setExcelState({...excelState, selectedResin: e.target.value})}>
-                                      <option value="">-- 선택하세요 --</option>
-                                      {excelState.availableResins.map((r, i) => <option key={i} value={r}>{r}</option>)}
-                                   </select>
-                                   {!excelState.selectedResin && <div className="text-red-500 text-xs mt-1 font-bold">선택한 수지의 데이터가 없습니다.</div>}
-                               </div>
-                           )}
-                           {!excelState.resinColumn && <div className="text-red-500 text-xs mt-1 font-bold">Excel에서 수지명/제품명 컬럼을 찾지 못했습니다. 직접 컬럼을 선택하십시오.</div>}
-                       </div>
-
-                       <div className="bg-white p-3 rounded border shadow-sm">
-                           <label className="block text-sm font-bold text-gray-700 mb-2">가져올 검사 항목 선택</label>
-                           <div className="space-y-2">
-                               {activePoints.map((p, idx) => (
-                                   <label key={idx} className="flex items-center gap-2 cursor-pointer p-1 hover:bg-gray-50 rounded">
-                                       <input type="checkbox" className="w-4 h-4 accent-indigo-600" checked={!!excelState.selectedPoints[p.originalIndex]} onChange={() => togglePointSelection(p.originalIndex)} />
-                                       <span className="text-sm font-bold text-gray-800">{p.name}</span>
-                                   </label>
-                               ))}
-                           </div>
-                           {Object.values(excelState.selectedPoints).every(v=>!v) && <div className="text-red-500 text-xs mt-2 font-bold">선택한 수지에 해당 검사 항목 데이터가 없습니다. (최소 1개 선택)</div>}
-                       </div>
-                   </div>
+                <div className="text-sm text-gray-600 bg-indigo-50 p-4 rounded-lg border border-indigo-100">
+                  <p>업로드한 엑셀 파일에서 <b>총 {excelState.data.length}건</b>의 행이 발견되었습니다.</p>
+                  <p className="mt-1">시스템의 각 입력 필드와 엑셀의 헤더(열 이름)를 알맞게 짝지어주세요.</p>
                 </div>
-
-                <div className="bg-white p-5 rounded-lg border border-gray-200 space-y-4">
-                    <h4 className="font-bold text-gray-800 text-base border-b pb-2">Step 2. 데이터 컬럼 매핑 (자동 매핑 확인)</h4>
-                    <div className="grid grid-cols-2 lg:grid-cols-3 gap-x-4 gap-y-4">
-                      <div className="bg-gray-50 p-2 rounded border">
-                        <label className="block text-xs font-bold text-gray-700 mb-1">측정일 (필수)</label>
-                        <select className="w-full border p-1 rounded outline-none bg-white font-medium text-xs" value={excelState.mapping.date} onChange={e => handleMapChange('date', e.target.value)}>
-                          {options.map((opt, i) => <option key={i} value={opt.value}>{opt.label}</option>)}
-                        </select>
-                      </div>
-                      <div className="bg-gray-50 p-2 rounded border">
-                        <label className="block text-xs font-bold text-gray-700 mb-1">LOT 번호</label>
-                        <select className="w-full border p-1 rounded outline-none bg-white font-medium text-xs" value={excelState.mapping.lotNumber} onChange={e => handleMapChange('lotNumber', e.target.value)}>
-                          {options.map((opt, i) => <option key={i} value={opt.value}>{opt.label}</option>)}
-                        </select>
-                      </div>
-                      {activePoints.map((p, idx) => (
-                        <div key={idx} className={`p-2 rounded border ${excelState.selectedPoints[p.originalIndex] ? 'bg-indigo-50 border-indigo-200' : 'bg-gray-50 opacity-50'}`}>
-                          <label className="block text-xs font-bold text-gray-700 mb-1">항목: {p.name}</label>
-                          <select className="w-full border p-1 rounded outline-none bg-white font-medium text-xs" value={excelState.mapping.points[p.originalIndex] || ''} onChange={e => handleMapChange('points', e.target.value, p.originalIndex)} disabled={!excelState.selectedPoints[p.originalIndex]}>
-                            {options.map((opt, i) => <option key={i} value={opt.value}>{opt.label}</option>)}
-                          </select>
-                        </div>
-                      ))}
-                      <div className="bg-gray-50 p-2 rounded border col-span-1 lg:col-span-3">
-                        <label className="block text-xs font-bold text-gray-700 mb-1">조치 및 특이사항</label>
-                        <select className="w-full border p-1 rounded outline-none bg-white font-medium text-xs" value={excelState.mapping.content} onChange={e => handleMapChange('content', e.target.value)}>
-                          {options.map((opt, i) => <option key={i} value={opt.value}>{opt.label}</option>)}
-                        </select>
-                      </div>
+                <div className="grid grid-cols-2 gap-x-6 gap-y-4">
+                  <div className="bg-gray-50 p-3 rounded-lg border">
+                    <label className="block text-sm font-bold text-gray-700 mb-1">측정일 (필수)</label>
+                    <select className="w-full border p-2 rounded outline-none bg-white font-medium" value={excelState.mapping.date} onChange={e => handleMapChange('date', e.target.value)}>
+                      {options.map((opt, i) => <option key={i} value={opt.value}>{opt.label}</option>)}
+                    </select>
+                  </div>
+                  <div className="bg-gray-50 p-3 rounded-lg border">
+                    <label className="block text-sm font-bold text-gray-700 mb-1">LOT 번호</label>
+                    <select className="w-full border p-2 rounded outline-none bg-white font-medium" value={excelState.mapping.lotNumber} onChange={e => handleMapChange('lotNumber', e.target.value)}>
+                      {options.map((opt, i) => <option key={i} value={opt.value}>{opt.label}</option>)}
+                    </select>
+                  </div>
+                  {activePoints.map((p, idx) => (
+                    <div key={idx} className="bg-gray-50 p-3 rounded-lg border">
+                      <label className="block text-sm font-bold text-gray-700 mb-1">항목: {p.name}</label>
+                      <select className="w-full border p-2 rounded outline-none bg-white font-medium" value={excelState.mapping.points[p.originalIndex] || ''} onChange={e => handleMapChange('points', e.target.value, p.originalIndex)}>
+                        {options.map((opt, i) => <option key={i} value={opt.value}>{opt.label}</option>)}
+                      </select>
                     </div>
+                  ))}
+                  <div className="bg-gray-50 p-3 rounded-lg border col-span-1 md:col-span-2">
+                    <label className="block text-sm font-bold text-gray-700 mb-1">조치 및 특이사항</label>
+                    <select className="w-full border p-2 rounded outline-none bg-white font-medium" value={excelState.mapping.content} onChange={e => handleMapChange('content', e.target.value)}>
+                      {options.map((opt, i) => <option key={i} value={opt.value}>{opt.label}</option>)}
+                    </select>
+                  </div>
+                  <div className="bg-indigo-50 p-3 rounded-lg border border-indigo-200 col-span-1 md:col-span-2 mt-2">
+                    <label className="block text-sm font-bold text-indigo-800 mb-1">이어서 추가 시, 데이터 중복 확인 기준</label>
+                    <select className="w-full border p-2 rounded outline-none bg-white text-sm font-medium" value={excelState.duplicateCriteria} onChange={e => setExcelState({...excelState, duplicateCriteria: e.target.value})}>
+                      <option value="date_lot">측정일 + LOT 번호가 일치하면 중복 (권장)</option>
+                      <option value="date">측정일만 일치해도 중복으로 간주</option>
+                      <option value="lot">LOT 번호만 일치해도 중복으로 간주</option>
+                    </select>
+                  </div>
                 </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div className="bg-gray-800 text-white p-5 rounded-lg border border-gray-700 space-y-2">
-                        <h4 className="font-bold text-lg border-b border-gray-600 pb-2 mb-3">미리보기 (Preview)</h4>
-                        <div className="flex justify-between text-sm"><span>전체 Excel 행:</span> <span className="font-bold">{excelState.data.length}</span></div>
-                        <div className="flex justify-between text-sm"><span>선택 수지:</span> <span className="font-bold text-indigo-300">{excelState.selectedResin || '-'}</span></div>
-                        <div className="flex justify-between text-sm"><span>선택 항목:</span> <span className="font-bold text-indigo-300">{activePoints.filter(p=>excelState.selectedPoints[p.originalIndex]).map(p=>p.name).join(', ') || '-'}</span></div>
-                        <div className="flex justify-between text-sm"><span>유효 데이터:</span> <span className="font-bold">{totalValidRows}</span></div>
-                        <div className="flex justify-between text-sm"><span>중복 예상:</span> <span className="font-bold text-orange-400">{expectedDupRows}</span></div>
-                        <div className="flex justify-between text-sm pt-2 border-t border-gray-600"><span>신규 반영(예상):</span> <span className="font-bold text-green-400 text-lg">{expectedNewRows}</span></div>
-                    </div>
-
-                    <div className="flex flex-col justify-end space-y-4">
-                        <div className="bg-indigo-50 p-3 rounded-lg border border-indigo-200">
-                          <label className="block text-sm font-bold text-indigo-800 mb-1">데이터 중복 확인 기준</label>
-                          <select className="w-full border p-2 rounded outline-none bg-white text-sm font-medium" value={excelState.duplicateCriteria} onChange={e => setExcelState({...excelState, duplicateCriteria: e.target.value})}>
-                            <option value="date_lot">측정일 + LOT 번호가 일치하면 중복 (권장)</option>
-                            <option value="date">측정일만 일치해도 중복으로 간주</option>
-                            <option value="lot">LOT 번호만 일치해도 중복으로 간주</option>
-                          </select>
-                        </div>
-                        <div className="flex gap-2">
-                          <button onClick={() => handleImportExcelData('overwrite')} className="flex-1 py-3 bg-red-50 text-red-600 border border-red-200 font-bold rounded-lg hover:bg-red-100 flex items-center justify-center gap-1 text-sm shadow-sm transition-colors"><Icons.RefreshCw /> <span>덮어쓰기</span></button>
-                          <button onClick={() => handleImportExcelData('append_unique')} disabled={expectedNewRows===0} className="flex-1 py-3 bg-indigo-600 text-white font-bold rounded-lg hover:bg-indigo-700 flex items-center justify-center gap-1 text-sm shadow-sm transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"><Icons.Upload /> <span>{expectedNewRows>0 ? '가져오기' : '반영할 데이터 없음'}</span></button>
-                        </div>
-                    </div>
+                <div className="flex flex-col md:flex-row justify-between items-center gap-3 pt-4 border-t">
+                  <button onClick={() => setExcelState({...excelState, isOpen: false})} className="w-full md:w-auto px-5 py-2.5 text-gray-600 font-bold bg-gray-100 hover:bg-gray-200 rounded-lg order-2 md:order-1">취소</button>
+                  <div className="flex flex-col md:flex-row gap-2 w-full md:w-auto order-1 md:order-2">
+                    <button onClick={() => handleImportExcelData('overwrite')} className="px-4 py-2.5 bg-red-50 text-red-600 border border-red-200 font-bold rounded-lg hover:bg-red-100 flex items-center justify-center gap-1 text-sm shadow-sm transition-colors"><Icons.RefreshCw /> <span>기존 삭제 후 덮어쓰기</span></button>
+                    <button onClick={() => handleImportExcelData('append_unique')} className="px-4 py-2.5 bg-indigo-600 text-white font-bold rounded-lg hover:bg-indigo-700 flex items-center justify-center gap-1 text-sm shadow-sm transition-colors"><Icons.Upload /> <span>중복 제외하고 추가</span></button>
+                  </div>
                 </div>
-
               </div>
             </div>
           </div>
@@ -2549,8 +2355,7 @@ ${decision}
            let rawVal = (l.values && Array.isArray(l.values)) ? l.values[currentPoint.originalIndex] : null;
            let numVal = null;
            if (rawVal !== '' && rawVal != null) { const parsed = parseFloat(String(rawVal).trim().split(/[\s,\[\]]+/)[0]); if (!isNaN(parsed)) numVal = parsed; }
-           const tbi = calculateAsymmetricTBI(numVal, currentPoint);
-           return { id: l.id, date: l.date, lotNumber: l.lotNumber, content: l.content, value: numVal, rawVal: rawVal, editorName: l.editorName, tbi: tbi !== null ? Number(tbi.toFixed(3)) : 0 };
+           return { id: l.id, date: l.date, lotNumber: l.lotNumber, content: l.content, value: numVal, rawVal: rawVal, editorName: l.editorName };
         }).filter(l => l.value !== null) : [];
 
         const n = chartLogs.length;
@@ -2847,118 +2652,9 @@ ${decision}
         </div>
       );
 
-
-      const renderAuditLog = () => {
-         const [filterUser, setFilterUser] = useState('');
-         const [filterAction, setFilterAction] = useState('');
-         const [selectedLog, setSelectedLog] = useState(null);
-
-         const filteredLogs = (auditLogs || []).filter(log => {
-             if (filterUser && !log.userName.includes(filterUser)) return false;
-             if (filterAction && log.action !== filterAction) return false;
-             return true;
-         });
-
-         return (
-            <div className="max-w-7xl mx-auto space-y-6 animate-in fade-in relative z-10">
-               <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 flex items-center gap-4">
-                  <button onClick={() => setView('dashboard')} className="p-3 bg-gray-100 rounded-full hover:bg-gray-200"><Icons.ArrowLeft /></button>
-                  <div>
-                     <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2"><Icons.Activity/> 데이터 변경 이력 (Audit Log)</h2>
-                     <p className="text-sm text-gray-500 mt-1">시스템에서 발생한 데이터 생성, 수정, 삭제 및 주요 이벤트를 기록합니다.</p>
-                  </div>
-               </div>
-
-               <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
-                  <div className="flex gap-4 mb-4">
-                      <input type="text" placeholder="사용자 검색" className="border px-3 py-2 rounded text-sm w-48" value={filterUser} onChange={e=>setFilterUser(e.target.value)}/>
-                      <select className="border px-3 py-2 rounded text-sm w-48" value={filterAction} onChange={e=>setFilterAction(e.target.value)}>
-                          <option value="">전체 작업</option>
-                          <option value="CREATE">생성 (CREATE)</option>
-                          <option value="UPDATE">수정 (UPDATE)</option>
-                          <option value="DELETE">삭제 (DELETE)</option>
-                          <option value="EXCEL_IMPORT">엑셀 임포트</option>
-                          <option value="BACKUP_RESTORE">백업 복구</option>
-                          <option value="LOCK_ACQUIRE">편집 권한 획득</option>
-                          <option value="LOCK_FORCE_RESET">편집 권한 초기화</option>
-                      </select>
-                  </div>
-
-                  <div className="overflow-x-auto border rounded-lg">
-                      <table className="w-full text-sm text-left">
-                          <thead className="bg-gray-100 border-b">
-                              <tr>
-                                  <th className="p-3 font-bold text-center">일시</th>
-                                  <th className="p-3 font-bold text-center">작업</th>
-                                  <th className="p-3 font-bold text-center">사용자</th>
-                                  <th className="p-3 font-bold text-center">PC 식별자</th>
-                                  <th className="p-3 font-bold text-center">제품명</th>
-                                  <th className="p-3 font-bold text-center">LOT</th>
-                                  <th className="p-3 font-bold text-center">상세보기</th>
-                              </tr>
-                          </thead>
-                          <tbody>
-                              {filteredLogs.length === 0 ? <tr><td colSpan="7" className="p-8 text-center text-gray-500">기록이 없습니다.</td></tr> :
-                               filteredLogs.map(log => (
-                                  <tr key={log.id} className="border-b hover:bg-gray-50">
-                                      <td className="p-3 text-center text-xs">{log.timestamp}</td>
-                                      <td className="p-3 text-center font-bold text-indigo-700">{log.action}</td>
-                                      <td className="p-3 text-center">{log.userName}</td>
-                                      <td className="p-3 text-center text-xs text-gray-500">{log.clientId}</td>
-                                      <td className="p-3 text-center font-medium">{log.productName}</td>
-                                      <td className="p-3 text-center">{log.lotNumber}</td>
-                                      <td className="p-3 text-center">
-                                          <button onClick={() => setSelectedLog(log)} className="text-xs bg-gray-200 hover:bg-gray-300 px-2 py-1 rounded">상세</button>
-                                      </td>
-                                  </tr>
-                               ))
-                              }
-                          </tbody>
-                      </table>
-                  </div>
-               </div>
-
-               {selectedLog && (
-                  <div className="fixed inset-0 bg-gray-900/60 flex items-center justify-center z-50 p-4">
-                      <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl overflow-hidden">
-                          <div className="p-4 border-b bg-gray-50 flex justify-between items-center">
-                              <h3 className="font-bold">Audit Log 상세정보</h3>
-                              <button onClick={() => setSelectedLog(null)} className="text-gray-500 hover:text-gray-800"><Icons.X/></button>
-                          </div>
-                          <div className="p-6 space-y-4 text-sm">
-                              <div className="grid grid-cols-2 gap-4 bg-gray-50 p-4 rounded border">
-                                  <div><span className="font-bold text-gray-500">작업:</span> {selectedLog.action}</div>
-                                  <div><span className="font-bold text-gray-500">일시:</span> {selectedLog.timestamp}</div>
-                                  <div><span className="font-bold text-gray-500">사용자:</span> {selectedLog.userName}</div>
-                                  <div><span className="font-bold text-gray-500">제품명:</span> {selectedLog.productName}</div>
-                                  <div className="col-span-2"><span className="font-bold text-gray-500">Client ID:</span> {selectedLog.clientId}</div>
-                                  <div className="col-span-2"><span className="font-bold text-gray-500">요약/설명:</span> {selectedLog.description || '-'}</div>
-                              </div>
-
-                              {(selectedLog.beforeData || selectedLog.afterData) && (
-                                  <div className="grid grid-cols-2 gap-4 mt-4">
-                                      <div className="border rounded-lg overflow-hidden">
-                                          <div className="bg-red-50 p-2 font-bold text-red-800 border-b text-center">변경 전 (Before / Delete)</div>
-                                          <pre className="p-4 text-xs whitespace-pre-wrap text-gray-700 bg-gray-50 min-h-[100px]">{selectedLog.beforeData || '-'}</pre>
-                                      </div>
-                                      <div className="border rounded-lg overflow-hidden">
-                                          <div className="bg-green-50 p-2 font-bold text-green-800 border-b text-center">변경 후 (After / Create)</div>
-                                          <pre className="p-4 text-xs whitespace-pre-wrap text-gray-700 bg-gray-50 min-h-[100px]">{selectedLog.afterData || '-'}</pre>
-                                      </div>
-                                  </div>
-                              )}
-                          </div>
-                      </div>
-                  </div>
-               )}
-            </div>
-         );
-      };
-
       const renderTopLevelContent = () => {
         if (view === 'settings') return renderSettings();
         if (view === 'history') return renderHistoryView();
-        if (view === 'audit') return renderAuditLog();
         return (
           <Fragment>
             {renderTopSyncPanel()}
