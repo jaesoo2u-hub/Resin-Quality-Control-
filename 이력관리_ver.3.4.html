@@ -674,6 +674,59 @@ ${decision}
         return null;
     };
 
+
+    const CHART_GUIDES = {
+        line: {
+            title: "SPC 관리도 (공정 안정성 추세)",
+            summary: "Batch별 측정값이 시간 또는 생산 순서에 따라 어떻게 움직이는지 보여주며, Target/규격과 통계적 관리한계를 함께 비교하여 공정의 중심 이동과 변동 패턴을 확인하는 그래프입니다.",
+            elements: [
+                { term: "측정값", desc: "각 Batch에서 측정한 실제 품질 수치" },
+                { term: "Target", desc: "제품이 의도적으로 맞추려는 목표값." },
+                { term: "USL", desc: "제품의 규격 상한. 이를 초과하면 규격 이탈(Spec-Out) 가능성을 의미합니다." },
+                { term: "LSL", desc: "제품의 규격 하한." },
+                { term: "CL", desc: "현재 데이터의 중심 수준을 나타내는 기준선." },
+                { term: "UCL", desc: "통계적 관리 상한. 제품 규격 상한이 아니라 공정의 일반적인 변동 범위를 판단하기 위한 통계적 기준입니다." },
+                { term: "LCL", desc: "통계적 관리 하한." },
+                { term: "Moving Average", desc: "최근 5 Batch의 이동평균선으로 단기 추세를 나타냅니다." },
+                { term: "Western Rule", desc: "이상 변동을 탐지하는 통계적 규칙" }
+            ],
+            lookFirst: "최근 Batch가 Target에서 어느 방향으로 움직이는가?",
+            lookNext: ["Sudden Jump가 있는가?", "산포가 증가하는가?", "규격에 접근하거나 이탈했는가?"],
+            caution: ["UCL/LCL과 USL/LSL을 혼동하지 말 것", "UCL/LCL을 벗어났다고 해서 곧바로 제품 불량을 의미하는 것은 아닙니다.", "USL/LSL을 벗어난 것은 규격 관점의 이상이며, UCL/LCL 이탈은 통계적 공정 변동 관점의 이상입니다.", "당사의 비연속적인 다품종 Batch 생산 환경에서는 생산 간격과 제품별 특성을 고려하여 패턴을 해석해야 합니다."],
+            context: "Target 주변에서 작은 폭으로 안정적으로 움직임 → 대체로 안정적인 상태\nTarget에서 여러 Batch에 걸쳐 한 방향으로 이동 → Target Drift 가능성 확인\n직전 Batch만 크게 튐 → Sudden Jump 가능성 확인\n값은 Target 주변이지만 UCL/LCL을 반복적으로 벗어남 → 변동성 또는 측정/공정 조건 점검 필요"
+        },
+        cpk: {
+            title: "Capability Analysis (공정능력 참고)",
+            summary: "Cpk 및 Moving Cpk의 변화 추세를 통해 현재 데이터가 규격 범위 안에서 어느 정도의 공정능력을 보이는지 참고하기 위한 분석입니다.",
+            elements: [
+                { term: "Cpk", desc: "해당 시점까지의 데이터로 계산된 공정능력" },
+                { term: "Moving Cpk", desc: "최근 특정 기간(Window) 동안의 단기 공정능력 추세" },
+                { term: "Cpm", desc: "Target 달성도를 중시하는 공정능력" },
+                { term: "Sigma", desc: "데이터의 변동성(산포)" }
+            ],
+            lookFirst: "Cpk가 규격 대비 어느 수준이며 최근 상승/하락하는가?",
+            lookNext: ["Moving Cpk가 어떻게 움직이는가?", "Target에서 실제로 멀어지고 있지는 않은가?"],
+            caution: ["Cpk만으로 합성수지 Batch 품질을 단독 판단하지 말 것", "제품별 Spec Width가 크게 다른 환경에서는 Cpk 값의 제품 간 직접 비교에 주의해야 합니다.", "데이터 수가 적은 경우 Cpk의 변동이 커질 수 있습니다.", "Target을 벗어나고 있어도 Spec 안에 머무르면 Cpk만으로는 이러한 상황을 충분히 설명하기 어려울 수 있습니다."],
+            context: "당사는 약 400여 종의 다품종 Batch 생산이며 동일 제품이 연속적으로 생산되지 않을 수 있으므로 Cpk만으로 전체 품질상태를 판단하는 것은 적절하지 않을 수 있습니다. Cpk는 참고지표로 활용하고, Target 편차/TBI, 최근 Batch 변화, Baseline, Spec-Out 등을 함께 확인해야 합니다.\n\n[실무해석]\nCpk 상승 → 공정능력 개선 방향\nCpk 하락 → 산포 증가/평균 이동 확인\nCpk 양호하나 Target에서 멀어짐 → Cpm/TBI 확인\nCpk 낮아도 실제 Spec-Out 여부 함께 확인"
+        },
+        area: {
+            title: "공정 분포도 (Distribution)",
+            summary: "전체 측정값이 어느 범위에 얼마나 분포되어 있는지 보여주며, 평균과 Target 및 규격의 관계를 확인하는 데 도움을 주는 그래프입니다.",
+            elements: [
+                { term: "분포", desc: "데이터가 밀집된 구간을 보여주는 확률밀도 또는 실측 산점도" },
+                { term: "평균", desc: "전체 데이터의 평균치 중심선" },
+                { term: "Target", desc: "맞추고자 하는 목표 중앙선" },
+                { term: "USL", desc: "규격 상한선" },
+                { term: "LSL", desc: "규격 하한선" },
+                { term: "Sigma", desc: "분포의 넓이로 산포(변동성) 크기를 나타냄" }
+            ],
+            lookFirst: "측정값이 Target 주변에 모여 있는가?",
+            lookNext: ["분포 폭은 어떤가?", "한쪽으로 치우쳤는가?"],
+            caution: ["데이터가 적으면 분포 형태 해석을 과도하게 하지 말 것", "분포도가 예쁘게 종 모양이라고 해서 공정이 반드시 안정적인 것은 아닙니다.", "Batch 생산 데이터가 적으면 정규분포 형태를 판단하기 어렵습니다.", "다품종 생산환경에서 서로 다른 제품의 데이터를 하나의 분포로 합쳐 해석해서는 안 됩니다."],
+            context: "동일 수지의 Batch 결과가 Target 주변에 몰려 있는지, 상한/하한 쪽으로 치우치는지, 폭이 넓어지는지 확인해야 합니다.\n\n[실무해석]\nTarget 주변 좁게 분포 → 중심성, 산포 양호\n평균은 Target 근처나 분포가 넓음 → Spread 변동성 확인\n평균 자체가 Target 한쪽으로 치우침 → Target Bias 확인\n일부 데이터만 규격 밖 → 해당 Batch Spec-Out 원인 확인"
+        }
+    };
+
     function QualityHistoryApp() {
       const [view, setView] = useState('dashboard');
       const [selectedId, setSelectedId] = useState(null);
@@ -739,6 +792,7 @@ ${decision}
 
       const [entries, setEntries] = useState([]);
       const [expandedChart, setExpandedChart] = useState(null);
+      const [showGuide, setShowGuide] = useState(true);
       const [chartZoom, setChartZoom] = useState({ refAreaLeft: '', refAreaRight: '', left: 'dataMin', right: 'dataMax' });
       const [showLines, setShowLines] = useState({ usl: true, lsl: true, target: true, ucl: true, lcl: true, cl: true });
 
@@ -2342,6 +2396,98 @@ ${decision}
          );
       };
 
+
+      const handleTermClick = (term) => {
+          try {
+              const termsDict = JSON.parse(localStorage.getItem('qualityAppTerms') || '{}');
+              const termData = termsDict[term] || termsDict[term.toLowerCase()] || termsDict[term.toUpperCase()];
+              if (termData) {
+                  // If the existing app has a function to open the term modal, we'd use it here.
+                  // Since we must not rewrite it, and there's no visible function, we'll try to dispatch a custom event or fallback to alert.
+                  // The prompt says "alert() 제거". We must use a Modal.
+                  setModalConfig({ type: 'info', message: `[${term}] 용어 설명:\n\n${termData.description || termData}` });
+              } else {
+                  setModalConfig({ type: 'info', message: `[${term}] 등록된 용어 설명이 없습니다.\n\n품질관리 용어 관리 메뉴에서 해당 용어를 먼저 추가해주십시오.` });
+              }
+          } catch (e) {
+              setModalConfig({ type: 'info', message: `[${term}] 등록된 용어 설명이 없습니다.` });
+          }
+      };
+
+      const renderChartGuide = (type) => {
+          const guide = CHART_GUIDES[type];
+          if (!guide) return null;
+
+          if (!showGuide) {
+              return (
+                  <div className="bg-indigo-50 border-t border-indigo-100 p-3 shrink-0 flex justify-between items-center cursor-pointer hover:bg-indigo-100 transition-colors" onClick={() => setShowGuide(true)}>
+                      <span className="font-bold text-indigo-800 flex items-center gap-2"><Icons.FileText /> 그래프 기능 및 해석 가이드 보기</span>
+                      <Icons.ChevronUp />
+                  </div>
+              );
+          }
+
+          return (
+              <div className="bg-white border-t border-gray-200 shrink-0 flex flex-col max-h-[40vh] overflow-y-auto shadow-inner relative">
+                  <div className="sticky top-0 bg-white/95 backdrop-blur border-b border-gray-100 p-3 flex justify-between items-center z-10 cursor-pointer hover:bg-gray-50" onClick={() => setShowGuide(false)}>
+                      <h4 className="font-black text-indigo-900 flex items-center gap-2"><Icons.FileText /> {guide.title} - 해석 가이드</h4>
+                      <button className="text-gray-500 hover:text-gray-800 p-1"><Icons.ChevronDown /></button>
+                  </div>
+
+                  <div className="p-5 grid grid-cols-1 lg:grid-cols-3 gap-6">
+                      <div className="space-y-4 col-span-1 border-r border-gray-100 pr-4">
+                          <div>
+                              <h5 className="font-bold text-gray-800 mb-2 flex items-center gap-1"><span className="text-indigo-600">💡</span> 이 그래프는 무엇을 보여주나요?</h5>
+                              <p className="text-sm text-gray-600 leading-relaxed bg-gray-50 p-3 rounded-lg border border-gray-100">{guide.summary}</p>
+                          </div>
+                          <div>
+                              <h5 className="font-bold text-red-600 mb-2 flex items-center gap-1"><Icons.AlertTriangle /> 주의할 점</h5>
+                              <ul className="text-sm text-gray-600 space-y-1.5 list-disc pl-4">
+                                  {guide.caution.map((c, i) => <li key={i}>{c}</li>)}
+                              </ul>
+                          </div>
+                      </div>
+
+                      <div className="space-y-4 col-span-1 border-r border-gray-100 pr-4">
+                          <h5 className="font-bold text-gray-800 mb-2 flex items-center gap-1"><span className="text-green-600">🔍</span> 무엇을 보면 되나요?</h5>
+                          <div className="bg-green-50 p-3 rounded-lg border border-green-100 mb-3">
+                              <p className="text-xs font-bold text-green-800 mb-1">가장 먼저 볼 것:</p>
+                              <p className="text-sm font-bold text-gray-800">{guide.lookFirst}</p>
+                          </div>
+                          <div className="bg-white p-3 rounded-lg border border-gray-200">
+                              <p className="text-xs font-bold text-gray-500 mb-1">그 다음 볼 것:</p>
+                              <ul className="text-sm text-gray-700 space-y-1.5 list-disc pl-4">
+                                  {guide.lookNext.map((n, i) => <li key={i}>{n}</li>)}
+                              </ul>
+                          </div>
+                      </div>
+
+                      <div className="space-y-4 col-span-1">
+                          <h5 className="font-bold text-gray-800 mb-2 flex items-center gap-1"><span className="text-blue-600">🏭</span> 합성수지 Batch 생산에서는?</h5>
+                          <p className="text-sm text-gray-600 leading-relaxed bg-blue-50 p-3 rounded-lg border border-blue-100 whitespace-pre-wrap">{guide.context}</p>
+                          <div className="mt-4">
+                              <p className="text-xs font-bold text-gray-400 mb-2">주요 기준선 및 데이터 요약</p>
+                              <div className="grid grid-cols-1 gap-2 max-h-[150px] overflow-y-auto pr-2">
+                                  {guide.elements.map((el, i) => (
+                                      <div key={i} className="flex flex-col bg-gray-50 p-2 rounded border border-gray-100">
+                                          <div className="flex justify-between items-center">
+                                              <span className="text-xs font-black text-indigo-700">{el.term}</span>
+                                              <button onClick={() => handleTermClick(el.term)} className="text-[10px] bg-indigo-100 text-indigo-800 px-1.5 py-0.5 rounded hover:bg-indigo-200 transition-colors shadow-sm font-bold">용어 설명</button>
+                                          </div>
+                                          <span className="text-xs text-gray-600 mt-1">{el.desc}</span>
+                                      </div>
+                                  ))}
+                              </div>
+                          </div>
+                      </div>
+                  </div>
+                  <div className="p-3 text-center text-xs font-bold text-gray-400 bg-gray-50 border-t border-gray-100">
+                      본 화면은 당사 환경에서 참고용 분석입니다. Smart Analysis의 최종 패턴 판단을 대체하지 않습니다.
+                  </div>
+              </div>
+          );
+      };
+
       const renderExpandedChartModal = () => {
         if (!expandedChart) return null;
         const entry = entries.find(e => e.id === selectedId);
@@ -2465,10 +2611,6 @@ ${decision}
                   {expandedChart.type === 'multi' && <Fragment><Icons.Layers/> 통합 관리도</Fragment>}
                 </h3>
                 <div className="flex items-center gap-3">
-                  <div className="flex items-center gap-2 bg-indigo-50 px-3 py-1.5 rounded-full border border-indigo-100 shadow-sm cursor-pointer hover:bg-indigo-100 transition-colors" onClick={() => setShowGuide(!showGuide)}>
-                      <Icons.FileText />
-                      <span className="text-xs font-bold text-indigo-800">해석 가이드 {showGuide ? '닫기' : '보기'}</span>
-                  </div>
                   {(expandedChart.type === 'line' || expandedChart.type === 'cpk') && chartZoom.left !== 'dataMin' && (
                      <button onClick={handleZoomOut} className="px-3 py-1.5 bg-red-50 text-red-600 border border-red-200 rounded-lg hover:bg-red-100 font-bold text-sm shadow-sm transition-colors">Zoom 초기화</button>
                   )}
@@ -2596,7 +2738,6 @@ ${decision}
                   </Fragment>
                 )}
               </div>
-              {renderChartGuide(expandedChart.type)}
             </div>
           </div>
         );
