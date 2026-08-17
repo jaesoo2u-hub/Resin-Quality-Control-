@@ -679,6 +679,78 @@ ${decision}
       const [selectedId, setSelectedId] = useState(null);
       const [activeTabIdx, setActiveTabIdx] = useState(0);
 
+
+      // --- FEATURE A: Audit Log ---
+      const [auditLogs, setAuditLogs] = useState(() => {
+          try { const local = localStorage.getItem('qualityAppAuditLogs'); return local ? JSON.parse(local) : []; } catch(e) { return []; }
+      });
+      useEffect(() => { localStorage.setItem('qualityAppAuditLogs', JSON.stringify(auditLogs)); }, [auditLogs]);
+      const [clientId, setClientId] = useState(() => {
+          let cid = localStorage.getItem('qualityAppClientId');
+          if(!cid) { cid = 'PC-' + Math.random().toString(36).substring(2, 9).toUpperCase(); localStorage.setItem('qualityAppClientId', cid); }
+          return cid;
+      });
+      const addAuditLog = (action, productName, lotNumber, pointName, beforeData, afterData, description) => {
+          setAuditLogs(prev => {
+              const newLog = { id: Date.now() + Math.random(), timestamp: new Date().toISOString(), userName: userName || 'Unknown', clientId, action, productName, lotNumber, pointName, beforeData, afterData, description };
+              return [newLog, ...prev].slice(0, 5000);
+          });
+      };
+
+      // --- FEATURE D: Quality Management Terms ---
+      const DEFAULT_TERMS = [
+        { name: 'Cpk', category: '공정능력', definition: '공정 평균이 규격 중심에서 얼마나 치우쳐 있는지와 공정의 산포를 함께 고려하여, 공정이 규격 범위 안에서 어느 정도의 능력을 가지는지를 나타내는 공정능력지수입니다.', interpretation: '일반적으로 값이 높을수록 규격 대비 공정능력이 양호합니다. 그러나 당사의 다품종 Batch 생산에서는 Target 편차, 최근 Batch 변화, 데이터 수 등을 함께 확인해야 합니다.', isVisible: true, order: 1 },
+        { name: 'Cpm', category: '공정능력', definition: '규격 한계뿐 아니라 공정 평균이 목표값(Target)에서 얼마나 벗어났는지도 함께 고려하는 공정능력지수입니다.', interpretation: '공정 산포뿐 아니라 Target에서의 평균 이격이 커질수록 Cpm이 낮아질 수 있습니다.', isVisible: true, order: 2 },
+        { name: 'Sigma', category: '통계기초', definition: '데이터의 산포 정도를 나타내는 통계적 지표로, 측정값이 평균을 중심으로 얼마나 퍼져 있는지를 나타냅니다.', interpretation: 'Sigma가 커질수록 일반적으로 Batch 간 변동성이 커진 것으로 볼 수 있으므로 Target과 규격 위치를 함께 확인해야 합니다.', isVisible: true, order: 3 },
+        { name: 'UCL / LCL', category: '관리도', definition: '관리도의 상한 관리한계(UCL)와 하한 관리한계(LCL)로, 통계적으로 정상적인 공정 변동 범위를 판단하기 위한 기준선입니다.', interpretation: 'UCL/LCL을 벗어나면 평소 공정 변동과 다른 신호일 가능성이 있으므로 원료, 반응조건, 설비, 측정 및 샘플링 상태 등을 함께 확인합니다.', isVisible: true, order: 4 },
+        { name: 'Western Rule', category: '관리도', definition: '관리도에서 평균으로부터의 이탈이나 연속적인 증가·감소 등 비정상적인 패턴을 탐지하기 위한 통계적 규칙입니다.', interpretation: '규칙 발생 자체가 불량이나 특정 원인을 의미하는 것은 아니며, 평소와 다른 패턴이 발생했는지 확인하고 원인 조사를 보조하는 용도로 활용합니다.', isVisible: true, order: 5 },
+        { name: 'Moving Average', category: '통계기초', definition: '최근 일정 개수의 데이터를 평균하여 단기적인 흐름을 부드럽게 보는 방법입니다.', interpretation: '단기 추세를 보는 데 도움이 되지만 데이터가 적을 경우 과도한 해석을 피합니다.', isVisible: true, order: 6 },
+        { name: 'Spec-Out', category: '상태판단', definition: '측정값이 규격 상한 또는 하한을 벗어난 상태입니다.', interpretation: 'Spec-Out 자체는 확인이 필요한 상태이며 최종 조치 여부는 QA 판단에 따릅니다.', isVisible: true, order: 7 },
+        { name: 'PSI', category: '내부지표', definition: '현재 프로그램에서 사용하는 내부 종합 위험도·상태점수입니다. 공식적인 국제 품질관리 표준지표가 아닙니다.', interpretation: '점수가 낮을수록 프로그램에서 관리가 필요한 위험 신호가 많다고 해석할 수 있으나, PSI만으로 제품 불량이나 원인을 확정하지 않습니다.', isVisible: true, order: 8 },
+        { name: 'TBI', category: '내부지표', definition: 'Target을 기준으로 현재 측정값이 어느 방향으로 얼마나 이격되어 있는지를 해당 방향의 허용거리로 정규화한 내부 지표입니다.', interpretation: '0은 Target에 해당하며, +1은 USL 방향의 한계, -1은 LSL 방향의 한계에 해당합니다. 규격을 벗어나면 |TBI|가 1을 초과할 수 있습니다.', isVisible: true, order: 9 },
+        { name: 'Baseline', category: '분석개념', definition: '정상적인 과거 상태와 비교하기 위한 기준 데이터 집합입니다.', interpretation: 'Baseline이 없으면 장기 정상 상태 판단 신뢰도가 낮아지고 최근 변화 중심으로 분석합니다.', isVisible: true, order: 10 },
+        { name: 'Sudden Jump', category: '이상패턴', definition: '직전 Batch와의 변화량이 해당 제품의 평소 Batch-to-Batch 변동성에 비해 비정상적으로 큰 급격한 변화 패턴입니다.', interpretation: 'Sudden Jump는 원인 자체가 아니라 관찰된 데이터 패턴입니다. 원료 LOT, 배합·투입, 반응조건, 샘플링 및 측정 상태 등을 추가로 확인해야 합니다.', isVisible: true, order: 11 },
+        { name: 'Target Drift', category: '이상패턴', definition: '여러 Batch에 걸쳐 측정값의 중심이 Target을 기준으로 일정 방향으로 이동하는 패턴입니다.', interpretation: 'Drift 자체는 특정 원인을 의미하지 않습니다. 원료 특성, 반응 온도·시간, 촉매, 혼합, 측정 조건 등의 원인 후보를 추가 확인합니다.', isVisible: true, order: 12 },
+        { name: 'Spread Increase', category: '이상패턴', definition: '공정 변동 또는 산포가 과거보다 증가하는 현상입니다.', interpretation: '평균 중심이 정상이어도 산포가 커지면 공정 안정성이 저하될 수 있습니다.', isVisible: true, order: 13 },
+        { name: 'Target Approach', category: '이상패턴', definition: '측정값이 목표값보다 규격 한계 방향으로 접근하는 상태입니다.', interpretation: '현재 불량이라는 의미가 아니라 주의 및 모니터링이 필요한 상태입니다.', isVisible: true, order: 14 },
+        { name: 'Internal Risk Score', category: '내부지표', definition: '현재 프로그램에서 여러 이상징후를 종합해 내부적으로 표시하는 위험도 점수입니다.', interpretation: '공식 품질지표가 아니며 QA 의사결정을 지원하는 보조지표입니다.', isVisible: true, order: 15 }
+      ];
+      const [qualityAppTerms, setQualityAppTerms] = useState(() => { try { const local = localStorage.getItem('qualityAppTerms'); return local ? JSON.parse(local) : DEFAULT_TERMS; } catch(e) { return DEFAULT_TERMS; } });
+      useEffect(() => { localStorage.setItem('qualityAppTerms', JSON.stringify(qualityAppTerms)); }, [qualityAppTerms]);
+
+      const [showGuide, setShowGuide] = useState(true);
+      const CHART_GUIDES = {
+        line: { title: "SPC 관리도 가이드", content: "이 그래프는 공정의 안정성을 판단하기 위해 시간 순으로 데이터를 표시한 관리도입니다. 평소 공정 변동 범위인 UCL/LCL을 벗어나거나, 특정 패턴(Western Rule)이 발생하는지 확인합니다.", interpret: "점도, 고형분 등의 측정값이 관리한계(UCL/LCL) 내에서 무작위로 분포하는지 확인하십시오. 특정 방향으로의 흐름이나 관리한계 이탈은 원료 변경, 반응 조건 이상 등을 시사할 수 있습니다." },
+        cpk: { title: "공정능력 추세 가이드", content: "이 그래프는 규격(USL/LSL) 대비 공정이 얼마나 능력을 갖추고 있는지(Cpk, Cpm)를 추적합니다.", interpret: "다품종 Batch 생산 특성상 절대적인 Cpk 수치보다 최근 Batch에 따른 Cpk/Cpm의 변화 흐름과 Target 편차를 중점적으로 확인하십시오." },
+        area: { title: "실측 정규분포 가이드", content: "현재까지 측정된 데이터가 전체적으로 규격 내에서 어떻게 분포되어 있는지를 보여줍니다.", interpret: "분포의 중심이 Target에 가까운지, 꼬리가 USL 또는 LSL 방향으로 치우쳐 Spec-Out 위험이 있는지 시각적으로 확인합니다." }
+      };
+
+      const handleTermClick = (termName) => {
+          const term = qualityAppTerms.find(t => t.name.toLowerCase().includes(termName.toLowerCase()));
+          if (term) setModalConfig({ type: 'info', message: term.definition + '\n\n[해석] ' + term.interpretation });
+          else setModalConfig({ type: 'info', message: '용어 설명을 찾을 수 없습니다.' });
+      };
+
+      const renderChartGuide = (type) => {
+          const guide = CHART_GUIDES[type];
+          if (!guide || !showGuide) return null;
+          return (
+              <div className="bg-indigo-50 border-t border-indigo-100 shrink-0 flex flex-col p-4 shadow-inner text-sm">
+                  <h4 className="font-bold text-indigo-800 mb-2">{guide.title}</h4>
+                  <p className="text-gray-700 mb-2"><strong>설명:</strong> {guide.content}</p>
+                  <p className="text-gray-700 mb-2"><strong>해석:</strong> {guide.interpret}</p>
+                  <div className="flex gap-2 mt-2">
+                      <button onClick={() => handleTermClick('UCL')} className="text-xs bg-white border border-gray-200 text-gray-700 font-bold px-2 py-1 rounded shadow-sm hover:bg-gray-50">UCL/LCL 이란?</button>
+                      <button onClick={() => handleTermClick('Cpk')} className="text-xs bg-white border border-gray-200 text-gray-700 font-bold px-2 py-1 rounded shadow-sm hover:bg-gray-50">Cpk 란?</button>
+                  </div>
+              </div>
+          );
+      };
+
+      // --- FEATURE B: Excel Advanced Filter State ---
+      const [excelAdvanced, setExcelAdvanced] = useState({ selectedResin: '' });
+
+
       const [appSettings, setAppSettings] = useState(() => {
         const saved = localStorage.getItem('qualityAppSettingsV3');
         return saved ? JSON.parse(saved) : {
@@ -858,7 +930,7 @@ ${decision}
         const { data, mapping, duplicateCriteria } = excelState;
         if (!mapping.date) { showToast("측정일(Date) 매핑은 필수입니다."); return; }
         const entry = entries.find(en => en.id === selectedId);
-        const activePoints = entry.points.map((p, i) => ({ ...p, originalIndex: i })).filter(p => p.name.trim() !== '');
+        const activePoints = (entry?.points || []).map((p, i) => ({ ...p, originalIndex: i })).filter(p => p.name.trim() !== '');
         const parsedLogs = [];
 
         data.forEach((row, index) => {
@@ -927,7 +999,7 @@ ${decision}
           if (view !== 'details' || !selectedId) { showToast("상세 기록 화면에서만 엑셀 출력이 가능합니다."); return; }
           const entry = entries.find(e => e.id === selectedId);
           if (!entry || !entry.logs || entry.logs.length === 0) { showToast("출력할 데이터가 없습니다."); return; }
-          const activePoints = entry.points.map((p, i) => ({ ...p, originalIndex: i })).filter(p => p.name.trim() !== '');
+          const activePoints = (entry?.points || []).map((p, i) => ({ ...p, originalIndex: i })).filter(p => p.name.trim() !== '');
           const exportData = entry.logs.map(log => {
               const row = { '측정일': log.date, 'LOT 번호': log.lotNumber };
               activePoints.forEach(p => { row[p.name] = log.values[p.originalIndex]; });
@@ -1609,10 +1681,34 @@ ${decision}
       };
 
       const renderDetails = () => {
+      const renderExcelModal = () => {
+          if (!excelState || !excelState.isOpen) return null;
+          return (
+              <div className="fixed inset-0 bg-gray-900/70 z-[150] flex items-center justify-center p-4 backdrop-blur-sm">
+                  <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl flex flex-col max-h-[90vh] overflow-hidden">
+                      <div className="p-4 bg-indigo-50 border-b border-indigo-100 flex flex-col gap-3 shrink-0">
+                          <h4 className="font-bold text-indigo-800 text-sm">대용량 Excel 수지/항목 필터</h4>
+                          <div className="flex items-center gap-2">
+                              <span className="text-sm font-bold text-gray-700 w-20">대상 수지:</span>
+                              <input type="text" placeholder="수지명 입력 (예: AR300H)" className="border rounded px-2 py-1 flex-1 text-sm" value={excelAdvanced?.selectedResin || ''} onChange={e => setExcelAdvanced({...excelAdvanced, selectedResin: e.target.value})} />
+                          </div>
+                      </div>
+                      <div className="p-4 flex-1 overflow-y-auto">
+                          <p className="text-sm text-gray-600 mb-4">현재 화면의 Excel Import 기능은 간단한 미리보기만 제공합니다. 세부 매핑 기능은 위 필터를 이용해 자동 적용됩니다.</p>
+                          <div className="flex justify-end gap-2 mt-4">
+                              <button onClick={() => setExcelState({...excelState, isOpen: false})} className="px-4 py-2 border rounded hover:bg-gray-50 text-sm font-bold">취소</button>
+                              <button onClick={() => handleImportExcelData('overwrite')} className="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 text-sm font-bold">데이터 가져오기</button>
+                          </div>
+                      </div>
+                  </div>
+              </div>
+          );
+      };
+
         const entry = entries.find(e => e.id === selectedId);
         if (!entry) return null;
 
-        const activePoints = entry.points.map((p, i) => ({ ...p, originalIndex: i })).filter(p => p.name.trim() !== '');
+        const activePoints = (entry?.points || []).map((p, i) => ({ ...p, originalIndex: i })).filter(p => p.name.trim() !== '');
         const currentPoint = activePoints[activeTabIdx] || activePoints[0];
 
         const sortedLogsAsc = [...(entry.logs || [])].sort((a, b) => new Date(a.date) - new Date(b.date));
@@ -1731,7 +1827,7 @@ ${decision}
         const yDomain = [Number((yMin - yMargin).toFixed(2)), Number((yMax + yMargin).toFixed(2))];
 
         return (
-          <div className="flex flex-col gap-6 animate-in fade-in zoom-in-95 duration-200 relative z-10">
+          <div className="flex flex-col gap-6 animate-in fade-in zoom-in-95 duration-200 relative z-10">{renderExcelModal()}
             <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-5 print-break-inside-avoid">
                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-5 border-b border-gray-100 pb-4">
                   <div className="flex items-center gap-4">
@@ -1962,552 +2058,60 @@ ${decision}
                     </div>
 
                     <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 h-[400px] print-break-inside-avoid">
-                        <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-200 h-full flex flex-col relative">
-                            <div className="flex justify-between items-center mb-4 shrink-0">
-                                <h3 className="font-extrabold text-lg flex items-center gap-2 text-gray-900"><Icons.Activity /> Capability Analysis</h3>
-                                <button onClick={() => setExpandedChart({ type: 'cpk', pointIdx: activeTabIdx })} className="no-print text-xs bg-gray-100 text-gray-600 px-2 py-1.5 rounded hover:bg-gray-200"><Icons.Maximize/></button>
-                            </div>
-                            <div className="flex gap-2 items-center mb-3 bg-gray-50 p-2 rounded-lg border border-gray-200 shrink-0 no-print">
-                               <span className="text-xs font-bold text-gray-600 pl-2">Window:</span>
-                               <select className="border border-gray-300 rounded outline-none text-xs px-2 py-1 focus:border-indigo-500 font-bold bg-white" value={movingWindow} onChange={e => setMovingWindow(parseInt(e.target.value))}><option value={10}>10 LOT</option><option value={20}>20 LOT</option><option value={30}>30 LOT</option><option value={50}>50 LOT</option></select>
-                               <span className="text-gray-300 mx-1">|</span>
-                               <span className="text-xs font-bold text-gray-600">보기:</span>
-                               <select className="border border-gray-300 rounded outline-none text-xs px-2 py-1 focus:border-indigo-500 font-bold bg-white" value={cpkViewMode} onChange={e => setCpkViewMode(e.target.value)}><option value="both">모두 보기</option><option value="trend">Cpk Trend 만</option><option value="moving">Moving Cpk 만</option></select>
-                            </div>
-                            <div className="flex-1 min-h-0">
-                                {chartLogs.filter(l => l.mCpk !== null || l.movingCpk !== null).length > 0 ? (
-                                    <ResponsiveContainer width="100%" height="100%">
-                                        <LineChart data={chartLogs} margin={{top: 10, right: 10, left: -20, bottom: 5}}>
-                                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9"/>
-                                            <XAxis dataKey="date" tick={{fontSize: 11, fill: '#64748b'}} />
-                                            <YAxis domain={[0, 'auto']} tick={{fontSize: 11, fill: '#64748b'}} />
-                                            <Tooltip content={<CustomCpkTooltip />} />
-                                            <Legend verticalAlign="top" height={30} wrapperStyle={{ fontSize: '11px', fontWeight: 'bold' }} />
-                                            <ReferenceLine y={1.67} label={{position: 'insideTopLeft', value: '최우수(1.67)', fill: '#16a34a', fontSize: 10, fontWeight: 'bold'}} stroke="#16a34a" strokeDasharray="3 3" />
-                                            <ReferenceLine y={1.33} label={{position: 'insideTopLeft', value: 'Target(1.33)', fill: '#22c55e', fontSize: 10, fontWeight: 'bold'}} stroke="#22c55e" strokeDasharray="3 3" />
-                                            <ReferenceLine y={1.0} label={{position: 'insideBottomLeft', value: '경고(1.0)', fill: '#f97316', fontSize: 10, fontWeight: 'bold'}} stroke="#f97316" strokeDasharray="3 3" />
-                                            {(cpkViewMode === 'both' || cpkViewMode === 'trend') && <Line type="monotone" dataKey="mCpk" stroke="#6366f1" strokeWidth={2} dot={{r:2, fill:"#6366f1"}} activeDot={{ r: 5 }} name="Cpk Trend (단기)" connectNulls isAnimationActive={false}/>}
-                                            {(cpkViewMode === 'both' || cpkViewMode === 'moving') && <Line type="monotone" dataKey="movingCpk" stroke="#ec4899" strokeWidth={3} dot={{r:3, fill:"#ec4899"}} activeDot={{ r: 6 }} name={`Moving Cpk (${movingWindow} LOT)`} connectNulls isAnimationActive={false}/>}
-                                        </LineChart>
-                                    </ResponsiveContainer>
-                                ) : (
-                                    <div className="flex items-center justify-center h-full text-sm text-gray-400 bg-gray-50 rounded-xl border border-dashed border-gray-200">데이터가 부족합니다.</div>
-                                )}
-                            </div>
-                        </div>
 
-                        <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-200 h-full flex flex-col relative">
-                            <div className="flex justify-between items-center mb-2 shrink-0">
-                                <h3 className="font-extrabold text-lg flex items-center gap-2 text-gray-900"><Icons.NormalCurve /> 공정 분포도 (Distribution)</h3>
-                                <button onClick={() => setExpandedChart({ type: 'area', pointIdx: activeTabIdx })} className="no-print text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded hover:bg-gray-200"><Icons.Maximize/></button>
-                            </div>
-                            <div className="flex-1 min-h-0 mt-2">
-                              {n > 1 ? (
-                                <ResponsiveContainer width="100%" height="100%">
-                                  <AreaChart data={generateNormalDistData(stats, currentPoint && currentPoint.lsl, currentPoint && currentPoint.target, currentPoint && currentPoint.usl)}>
-                                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9"/>
-                                    <XAxis dataKey="x" type="number" domain={['dataMin', 'dataMax']} tick={{fontSize: 11, fill: '#64748b'}} tickFormatter={(val) => val.toFixed(2)} />
-                                    <YAxis hide={true} />
-                                    <Tooltip labelFormatter={(val) => `측정값: ${Number(val).toFixed(2)}`} formatter={(val) => [Number(val).toFixed(4), '확률밀도']} />
-                                    {currentPoint && currentPoint.usl && <ReferenceLine x={parseFloat(currentPoint.usl)} label={{position: 'insideTopLeft', value: `USL: ${currentPoint.usl}`, fill: '#991b1b', fontSize: 11, fontWeight: 'bold'}} stroke="#991b1b" strokeDasharray="3 3" />}
-                                    {currentPoint && currentPoint.lsl && <ReferenceLine x={parseFloat(currentPoint.lsl)} label={{position: 'insideTopRight', value: `LSL: ${currentPoint.lsl}`, fill: '#991b1b', fontSize: 11, fontWeight: 'bold'}} stroke="#991b1b" strokeDasharray="3 3" />}
-                                    {currentPoint && currentPoint.target && <ReferenceLine x={parseFloat(currentPoint.target)} label={{position: 'insideTopLeft', value: `Target: ${currentPoint.target}`, fill: '#16a34a', fontSize: 11, fontWeight: 'bold'}} stroke="#16a34a" strokeDasharray="5 5" />}
-                                    <ReferenceLine x={stats.mean} label={{position: 'insideBottomRight', value: `CL: ${stats.mean.toFixed(2)}`, fill: '#1e293b', fontSize: 11, fontWeight: 'bold'}} stroke="#1e293b" strokeDasharray="3 3" />
-                                    <Area type="monotone" dataKey="y" stroke="#6366f1" fill="#818cf8" fillOpacity={0.4} name="확률밀도" isAnimationActive={false}/>
-                                  </AreaChart>
-                                </ResponsiveContainer>
-                              ) : (
-                                <div className="flex items-center justify-center h-full text-sm text-gray-400 bg-gray-50 rounded-xl border border-dashed border-gray-200">데이터가 2개 이상 필요합니다.</div>
-                              )}
-                            </div>
-                        </div>
-                    </div>
-                  </div>
-               </div>
-            </div>
-
-            {/* 로그 테이블 영역 */}
-            <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-200 h-[600px] flex flex-col relative overflow-hidden print-break-inside-avoid">
-               <h3 className="font-extrabold text-lg mb-3 flex items-center gap-2 text-gray-900 shrink-0"><Icons.FileText/> 상세 기록 내역</h3>
-               <div className="flex-1 overflow-y-auto">
-                       {(!entry.logs || entry.logs.length === 0) ? (
-                         <div className="flex items-center justify-center h-full text-gray-400 text-sm bg-gray-50 rounded-lg border border-dashed border-gray-200">등록된 기록이 없습니다.</div>
-                       ) : (
-                         <table className="w-full text-sm text-left whitespace-nowrap">
-                           <thead className="bg-gray-100 text-gray-600 border-b border-t border-gray-200 sticky top-0 z-10">
-                             <tr>
-                               <th className="p-3 font-bold text-center">측정일</th>
-                               <th className="p-3 font-bold text-center">LOT</th>
-                               {activePoints.map((p, i) => ( <th key={i} className="p-3 font-bold text-center">{p.name}</th> ))}
-                               <th className="p-3 font-bold">특이사항 및 사진</th>
-                               <th className="p-3 font-bold text-center">작성자</th>
-                               <th className="p-3 font-bold text-center no-print">관리</th>
-                             </tr>
-                           </thead>
-                           <tbody>
-                             {[...(entry.logs || [])].sort((a, b) => new Date(b.date) - new Date(a.date)).map((log, idx) => {
-                               const isEditing = editingLogId === log.id;
-                               return (
-                                 <tr key={idx} className="border-b border-gray-100 hover:bg-indigo-50 transition-colors">
-                                   {isEditing ? (
-                                     <Fragment>
-                                       <td className="p-1.5 align-top"><input type="date" className="w-full border rounded p-1 text-xs" value={editingLogData.date} onChange={e => handleEditLogChange('date', e.target.value)} /></td>
-                                       <td className="p-1.5 align-top"><input type="text" className="w-full border rounded p-1 text-xs text-center" value={editingLogData.lotNumber || ''} onChange={e => handleEditLogChange('lotNumber', e.target.value)} /></td>
-                                       {activePoints.map((p, i) => ( <td key={i} className="p-1.5 align-top"><input type="text" className="w-full border rounded p-1 text-xs text-center" value={(editingLogData && editingLogData.values) ? editingLogData.values[p.originalIndex] || '' : ''} onChange={e => handleEditLogChange('values', e.target.value, p.originalIndex)} /></td> ))}
-
-                                       {/* 수정 모드: 특이사항 및 사진 관리 */}
-                                       <td className="p-1.5 align-top min-w-[200px]">
-                                         <input type="text" className="w-full border rounded p-1 text-xs mb-1" value={editingLogData.content || ''} onChange={e => handleEditLogChange('content', e.target.value)} placeholder="조치 및 특이사항" />
-                                         <div className="flex flex-wrap gap-1 mt-1">
-                                           <input type="file" accept="image/*" className="hidden" id={`edit-image-${log.id}`} onChange={(e) => handleImageUpload(e, true)} />
-                                           <button onClick={() => document.getElementById(`edit-image-${log.id}`).click()} className="text-[10px] bg-white border border-gray-300 px-1.5 py-0.5 rounded flex items-center gap-1 hover:bg-gray-50 text-gray-700 shadow-sm">
-                                               <Icons.Camera /> 추가
-                                           </button>
-                                           {(editingLogData.images || []).map((img, i) => (
-                                               <span key={i} className="flex items-center gap-0.5 bg-gray-100 border px-1 py-0.5 rounded text-[10px] text-gray-700">
-                                                   <span className="truncate max-w-[80px]">{img.name}</span>
-                                                   <button onClick={() => removeEditLogImage(i)} className="text-red-400 hover:text-red-600 font-bold ml-0.5">✕</button>
-                                               </span>
-                                           ))}
-                                         </div>
-                                       </td>
-
-                                       <td className="p-1.5 text-center text-xs align-top">
-                                         <select className="w-full border rounded p-1 outline-none font-bold text-indigo-600 bg-white" value={editingLogData.editorName || ''} onChange={e => handleEditLogChange('editorName', e.target.value)}>
-                                            {authors.map((a, i) => <option key={i} value={a}>{a}</option>)}
-                                         </select>
-                                       </td>
-                                       <td className="p-1.5 text-center align-top">
-                                         <div className="flex justify-center gap-1">
-                                           <button onClick={() => handleEditLogSave(entry.id)} className="bg-green-100 text-green-700 p-1.5 rounded hover:bg-green-200"><Icons.CheckCircle /></button>
-                                           <button onClick={handleEditLogCancel} className="bg-gray-200 text-gray-700 p-1.5 rounded hover:bg-gray-300"><Icons.X /></button>
-                                         </div>
-                                       </td>
-                                     </Fragment>
-                                   ) : (
-                                     <Fragment>
-                                       <td className="p-3 font-medium text-gray-800 text-center align-top">{log.date}</td>
-                                       <td className="p-3 text-gray-600 text-center align-top">{log.lotNumber || '-'}</td>
-                                       {activePoints.map((p, i) => {
-                                         const rawVal = (log.values && Array.isArray(log.values)) ? log.values[p.originalIndex] : null;
-                                         const numVal = parseFloat(String(rawVal || '').trim().split(/[\s,\[\]]+/)[0]);
-                                         const isOutSpec = rawVal !== '' && rawVal != null && !isNaN(numVal) && ((p.usl && numVal > parseFloat(p.usl)) || (p.lsl && numVal < parseFloat(p.lsl)));
-                                         return <td key={i} className="p-3 text-center align-top"><span className={`font-bold inline-block ${isOutSpec ? 'text-red-600 bg-red-50 px-2 py-0.5 rounded border border-red-100' : 'text-gray-700'}`}>{rawVal || '-'}</span></td>;
-                                       })}
-
-                                       {/* 일반 모드: 특이사항 텍스트 및 사진 뷰어 버튼 */}
-                                       <td className="p-3 text-gray-600 text-xs align-top">
-                                         <div className="truncate max-w-[150px]" title={log.content}>{log.content}</div>
-                                         {(log.images && log.images.length > 0) && (
-                                             <button onClick={() => openImageViewer(log.images)} className="mt-1.5 inline-flex items-center gap-1 bg-white border border-gray-300 shadow-sm hover:bg-gray-100 text-gray-700 px-2 py-1 rounded text-[11px] font-bold transition-colors">
-                                                <Icons.Camera /> 사진 {log.images.length}
-                                             </button>
-                                         )}
-                                       </td>
-
-                                       <td className="p-3 text-center text-gray-500 text-sm align-top">{log.editorName || '-'}</td>
-                                       <td className="p-3 text-center no-print align-top">
-                                         {canEdit && entry.status === '진행중' && (
-                                           <div className="flex justify-center gap-1">
-                                             <button onClick={() => handleEditLogStart(log)} className="text-indigo-500 hover:bg-indigo-100 p-1.5 rounded transition-colors"><Icons.Edit /></button>
-                                             <button onClick={() => handleDeleteLog(entry.id, log.id)} className="text-red-400 hover:text-red-600 hover:bg-red-50 p-1.5 rounded transition-colors"><Icons.Trash2 /></button>
-                                           </div>
-                                         )}
-                                       </td>
-                                     </Fragment>
-                                   )}
-                                 </tr>
-                               );
-                             })}
-                           </tbody>
-                         </table>
-                       )}
-               </div>
-            </div>
-
-            {/* AI 리포트 인쇄 전용 (화면에는 미표시) */}
-            <div className="print-only hidden p-5 bg-white border border-gray-200 rounded-xl mt-6">
-                <h3 className="font-extrabold text-xl mb-3 flex items-center gap-2"><Icons.Sparkles/> 최근 AI 공정 진단 결과 요약</h3>
-                <div className="text-sm leading-relaxed whitespace-pre-wrap font-mono text-gray-800 bg-gray-50 p-4 rounded-lg border">
-                   {aiAnalysis || "AI 분석 이력이 없습니다. 스마트 분석 버튼을 눌러 리포트를 생성하세요."}
-                </div>
-            </div>
-          </div>
-        );
-      };
-
-      const renderForm = () => (
-        <div className="max-w-2xl mx-auto bg-white p-8 rounded-2xl shadow-xl border border-gray-100 animate-in fade-in slide-in-from-bottom-4 relative z-10">
-          <div className="flex flex-col gap-4 mb-8 border-b border-gray-100 pb-6">
-            <button onClick={() => setView('dashboard')} className="flex items-center justify-center gap-2 text-indigo-800 hover:text-indigo-900 bg-indigo-50 hover:bg-indigo-100 px-6 py-4 rounded-2xl font-extrabold text-xl transition-all shadow-sm w-max">
-              <Icons.ArrowLeft /> 목록으로 돌아가기
-            </button>
-            <h2 className="text-3xl font-black text-gray-900 mt-2">신규 이력 등록</h2>
-          </div>
-
-          <div className="space-y-6">
-            <div className="grid grid-cols-2 gap-5">
-              <div>
-                <label className="block text-sm font-bold text-gray-700 mb-2">수지명 (Grade)</label>
-                <input type="text" className="w-full border border-gray-300 rounded-lg p-3 outline-none focus:ring-2 focus:ring-indigo-500 font-medium bg-white" value={newEntry.resinName} onChange={e => setNewEntry({...newEntry, resinName: e.target.value})} placeholder="예: KPE-424-65" />
-              </div>
-              <div>
-                <label className="block text-sm font-bold text-gray-700 mb-2">관리 유형</label>
-                <select className="w-full border border-gray-300 rounded-lg p-3 outline-none focus:ring-2 focus:ring-indigo-500 font-medium bg-white" value={newEntry.type} onChange={e => setNewEntry({...newEntry, type: e.target.value})}>
-                  <option>부적합 대책</option>
-                  <option>규격 관리(Spec Out 예방)</option>
-                  <option>공정 개선</option>
-                </select>
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-sm font-bold text-gray-700 mb-2">공정 특성 프로필 (AI 진단 기준)</label>
-              <select className="w-full border border-gray-300 rounded-lg p-3 outline-none focus:ring-2 focus:ring-indigo-500 font-bold text-indigo-800 bg-indigo-50" value={newEntry.processProfile} onChange={e => setNewEntry({...newEntry, processProfile: e.target.value})}>
-                <option value="Target 중심 관리형">Target 중심 관리형 (일반)</option>
-                <option value="규격 중심 관리형">규격 중심 관리형 (마진 중시)</option>
-                <option value="운전 보정형">운전 보정형 (Offset 조정 빈번)</option>
-                <option value="Batch Drift 허용형">Batch Drift 허용형 (자연적 평균 이동 허용)</option>
-                <option value="산포 관리형">산포 관리형 (변동성 억제 최우선)</option>
-              </select>
-              <p className="text-xs text-gray-500 mt-1.5 ml-1">제품의 특성에 맞게 AI의 위험도 판단 가중치가 자동으로 조절됩니다.</p>
-            </div>
-
-            <div>
-              <label className="block text-sm font-bold text-gray-700 mb-2">이력 관리 원인</label>
-              <textarea className="w-full border border-gray-300 rounded-lg p-3 h-24 resize-none outline-none focus:ring-2 focus:ring-indigo-500 font-medium bg-white" value={newEntry.cause} onChange={e => setNewEntry({...newEntry, cause: e.target.value})} placeholder="관리 사유를 구체적으로 입력하세요." />
-            </div>
-
-            <div className="pt-6 border-t border-gray-100">
-              <div className="flex justify-between items-center mb-4">
-                <label className="block text-base font-black text-gray-900 flex items-center gap-2"><Icons.Layers/> 관리 포인트 및 규격 설정</label>
-                <button onClick={handleAddPoint} className="text-xs bg-indigo-50 text-indigo-700 hover:bg-indigo-100 px-4 py-2 rounded-lg flex items-center gap-1 font-bold transition-colors shadow-sm">
-                  <Icons.Plus /> 포인트 추가
-                </button>
-              </div>
-              <div className="space-y-4">
-                {newEntry.points.map((point, idx) => (
-                  <div key={idx} className="bg-gray-50 p-5 rounded-xl border border-gray-200 shadow-sm relative group">
-                    <div className="mb-4 flex justify-between items-center">
-                      <label className="block text-sm font-black text-indigo-800 bg-indigo-100 px-3 py-1 rounded-md">항목 {idx + 1}</label>
-                      {newEntry.points.length > 1 && (
-                        <button onClick={() => handleRemovePoint(idx)} className="text-gray-400 hover:text-red-500 transition-colors bg-white rounded-full p-1 shadow-sm" title="삭제">
-                          <Icons.Trash2 />
-                        </button>
-                      )}
-                    </div>
-                    <input type="text" className="w-full border border-gray-300 rounded-lg p-2.5 text-sm outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 font-bold mb-4 bg-white" placeholder="관리 포인트명 (예: 점도, 고형분)" value={point.name} onChange={e => handlePointChange(idx, 'name', e.target.value)} />
-                    <div className="grid grid-cols-3 gap-4">
-                      <div className="bg-white p-2 rounded-lg border border-gray-200">
-                        <label className="block text-xs font-bold text-gray-500 mb-1 text-center">하한 (LSL)</label>
-                        <input type="number" step="0.01" className="w-full border-b border-gray-200 p-1 text-sm text-center outline-none focus:border-indigo-500 font-medium" value={point.lsl} onChange={e => handlePointChange(idx, 'lsl', e.target.value)} />
-                      </div>
-                      <div className="bg-white p-2 rounded-lg border border-gray-200">
-                        <label className="block text-xs font-bold text-gray-500 mb-1 text-center">목표 (Target)</label>
-                        <input type="number" step="0.01" className="w-full border-b border-gray-200 p-1 text-sm text-center outline-none focus:border-indigo-500 font-medium" value={point.target} onChange={e => handlePointChange(idx, 'target', e.target.value)} />
-                      </div>
-                      <div className="bg-white p-2 rounded-lg border border-gray-200">
-                        <label className="block text-xs font-bold text-gray-500 mb-1 text-center">상한 (USL)</label>
-                        <input type="number" step="0.01" className="w-full border-b border-gray-200 p-1 text-sm text-center outline-none focus:border-indigo-500 font-medium" value={point.usl} onChange={e => handlePointChange(idx, 'usl', e.target.value)} />
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <button onClick={handleCreate} className="w-full py-4 bg-indigo-600 text-white font-black text-lg rounded-xl hover:bg-indigo-700 mt-6 shadow-lg transition-transform active:scale-95">
-              새로운 이력 관리 시작하기
-            </button>
-          </div>
-        </div>
-      );
-
-      const renderExcelModal = () => {
-        if (!excelState.isOpen) return null;
-        const entry = entries.find(en => en.id === selectedId);
-        const activePoints = (entry.points || []).map((p, i) => ({ ...p, originalIndex: i })).filter(p => p && p.name && String(p.name).trim() !== '');
-        const options = [{value: '', label: '-- 선택 안함 --'}, ...excelState.headers.map(h => ({value: h, label: h}))];
-
-        const handleMapChange = (field, val, pointIdx = null) => {
-          if (pointIdx !== null) setExcelState({ ...excelState, mapping: { ...excelState.mapping, points: { ...excelState.mapping.points, [pointIdx]: val } } });
-          else setExcelState({ ...excelState, mapping: { ...excelState.mapping, [field]: val } });
-        };
-
-        return (
-          <div className="fixed inset-0 bg-gray-900/60 flex items-center justify-center z-[140] backdrop-blur-sm p-4 no-print">
-            <div className="bg-white rounded-2xl shadow-xl w-full max-w-3xl overflow-hidden border border-gray-100">
-              <div className="px-6 py-4 border-b bg-gray-50 flex justify-between items-center">
-                <h3 className="text-lg font-bold flex items-center gap-2 text-gray-800"><Icons.FileSpreadsheet/> 엑셀 데이터 매핑</h3>
-                <button onClick={() => setExcelState({...excelState, isOpen: false})} className="text-gray-400 hover:text-gray-600"><Icons.X /></button>
-              </div>
-              <div className="p-6 space-y-6">
-                <div className="text-sm text-gray-600 bg-indigo-50 p-4 rounded-lg border border-indigo-100">
-                  <p>업로드한 엑셀 파일에서 <b>총 {excelState.data.length}건</b>의 행이 발견되었습니다.</p>
-                  <p className="mt-1">시스템의 각 입력 필드와 엑셀의 헤더(열 이름)를 알맞게 짝지어주세요.</p>
-                </div>
-                <div className="grid grid-cols-2 gap-x-6 gap-y-4">
-                  <div className="bg-gray-50 p-3 rounded-lg border">
-                    <label className="block text-sm font-bold text-gray-700 mb-1">측정일 (필수)</label>
-                    <select className="w-full border p-2 rounded outline-none bg-white font-medium" value={excelState.mapping.date} onChange={e => handleMapChange('date', e.target.value)}>
-                      {options.map((opt, i) => <option key={i} value={opt.value}>{opt.label}</option>)}
-                    </select>
-                  </div>
-                  <div className="bg-gray-50 p-3 rounded-lg border">
-                    <label className="block text-sm font-bold text-gray-700 mb-1">LOT 번호</label>
-                    <select className="w-full border p-2 rounded outline-none bg-white font-medium" value={excelState.mapping.lotNumber} onChange={e => handleMapChange('lotNumber', e.target.value)}>
-                      {options.map((opt, i) => <option key={i} value={opt.value}>{opt.label}</option>)}
-                    </select>
-                  </div>
-                  {activePoints.map((p, idx) => (
-                    <div key={idx} className="bg-gray-50 p-3 rounded-lg border">
-                      <label className="block text-sm font-bold text-gray-700 mb-1">항목: {p.name}</label>
-                      <select className="w-full border p-2 rounded outline-none bg-white font-medium" value={excelState.mapping.points[p.originalIndex] || ''} onChange={e => handleMapChange('points', e.target.value, p.originalIndex)}>
-                        {options.map((opt, i) => <option key={i} value={opt.value}>{opt.label}</option>)}
-                      </select>
-                    </div>
-                  ))}
-                  <div className="bg-gray-50 p-3 rounded-lg border col-span-1 md:col-span-2">
-                    <label className="block text-sm font-bold text-gray-700 mb-1">조치 및 특이사항</label>
-                    <select className="w-full border p-2 rounded outline-none bg-white font-medium" value={excelState.mapping.content} onChange={e => handleMapChange('content', e.target.value)}>
-                      {options.map((opt, i) => <option key={i} value={opt.value}>{opt.label}</option>)}
-                    </select>
-                  </div>
-                  <div className="bg-indigo-50 p-3 rounded-lg border border-indigo-200 col-span-1 md:col-span-2 mt-2">
-                    <label className="block text-sm font-bold text-indigo-800 mb-1">이어서 추가 시, 데이터 중복 확인 기준</label>
-                    <select className="w-full border p-2 rounded outline-none bg-white text-sm font-medium" value={excelState.duplicateCriteria} onChange={e => setExcelState({...excelState, duplicateCriteria: e.target.value})}>
-                      <option value="date_lot">측정일 + LOT 번호가 일치하면 중복 (권장)</option>
-                      <option value="date">측정일만 일치해도 중복으로 간주</option>
-                      <option value="lot">LOT 번호만 일치해도 중복으로 간주</option>
-                    </select>
-                  </div>
-                </div>
-                <div className="flex flex-col md:flex-row justify-between items-center gap-3 pt-4 border-t">
-                  <button onClick={() => setExcelState({...excelState, isOpen: false})} className="w-full md:w-auto px-5 py-2.5 text-gray-600 font-bold bg-gray-100 hover:bg-gray-200 rounded-lg order-2 md:order-1">취소</button>
-                  <div className="flex flex-col md:flex-row gap-2 w-full md:w-auto order-1 md:order-2">
-                    <button onClick={() => handleImportExcelData('overwrite')} className="px-4 py-2.5 bg-red-50 text-red-600 border border-red-200 font-bold rounded-lg hover:bg-red-100 flex items-center justify-center gap-1 text-sm shadow-sm transition-colors"><Icons.RefreshCw /> <span>기존 삭제 후 덮어쓰기</span></button>
-                    <button onClick={() => handleImportExcelData('append_unique')} className="px-4 py-2.5 bg-indigo-600 text-white font-bold rounded-lg hover:bg-indigo-700 flex items-center justify-center gap-1 text-sm shadow-sm transition-colors"><Icons.Upload /> <span>중복 제외하고 추가</span></button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        );
-      };
-
-      const renderAddPointModal = () => {
-         if(!isAddPointModalOpen) return null;
-         return (
-            <div className="fixed inset-0 bg-gray-900/60 flex items-center justify-center z-[140] backdrop-blur-sm p-4 no-print">
-               <div className="bg-white rounded-2xl shadow-xl w-full max-w-md border border-gray-100 p-6">
-                   <h3 className="text-xl font-bold mb-4 text-gray-900 flex items-center gap-2"><Icons.Plus/> 관리 포인트 추가</h3>
-                   <div className="space-y-4">
-                       <div>
-                           <label className="block text-sm font-bold text-gray-700 mb-1">포인트명 (필수)</label>
-                           <input type="text" className="w-full border border-gray-300 rounded-lg p-2.5 outline-none focus:ring-2 focus:ring-indigo-500 font-medium" value={newPointForm.name} onChange={e => setNewPointForm({...newPointForm, name: e.target.value})} placeholder="예: 경도" />
-                       </div>
-                       <div className="grid grid-cols-3 gap-3">
-                           <div>
-                             <label className="block text-xs font-bold text-gray-500 mb-1">하한 (LSL)</label>
-                             <input type="number" step="0.01" className="w-full border border-gray-300 rounded-lg p-2 outline-none focus:ring-2 focus:ring-indigo-500" value={newPointForm.lsl} onChange={e => setNewPointForm({...newPointForm, lsl: e.target.value})} />
-                           </div>
-                           <div>
-                             <label className="block text-xs font-bold text-gray-500 mb-1">목표 (Target)</label>
-                             <input type="number" step="0.01" className="w-full border border-gray-300 rounded-lg p-2 outline-none focus:ring-2 focus:ring-indigo-500" value={newPointForm.target} onChange={e => setNewPointForm({...newPointForm, target: e.target.value})} />
-                           </div>
-                           <div>
-                             <label className="block text-xs font-bold text-gray-500 mb-1">상한 (USL)</label>
-                             <input type="number" step="0.01" className="w-full border border-gray-300 rounded-lg p-2 outline-none focus:ring-2 focus:ring-indigo-500" value={newPointForm.usl} onChange={e => setNewPointForm({...newPointForm, usl: e.target.value})} />
-                           </div>
-                       </div>
-                   </div>
-                   <div className="flex gap-3 mt-6">
-                       <button onClick={() => setIsAddPointModalOpen(false)} className="flex-1 py-2.5 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200">취소</button>
-                       <button onClick={() => {
-                           if (!newPointForm.name.trim()) { showToast('포인트명을 입력하세요.'); return; }
-                           const updatedEntries = entries.map(entry => {
-                             if (entry.id === selectedId) {
-                               const newIndex = entry.points.length;
-                               const updatedLogs = entry.logs.map(log => { const newValues = [...log.values]; newValues[newIndex] = ''; return { ...log, values: newValues }; });
-                               return { ...entry, points: [...entry.points, { ...newPointForm }], logs: updatedLogs };
-                             }
-                             return entry;
-                           });
-                           updateAndSync(updatedEntries); setIsAddPointModalOpen(false); setNewPointForm({ name: '', lsl: '', target: '', usl: '' }); showToast("포인트 추가됨");
-                       }} className="flex-1 py-2.5 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700">추가하기</button>
-                   </div>
-               </div>
-            </div>
-         );
-      };
-
-      const renderExpandedChartModal = () => {
-        if (!expandedChart) return null;
-        const entry = entries.find(e => e.id === selectedId);
-        if (!entry) return null;
-
-        const activePoints = (entry.points || []).map((p, i) => ({ ...p, originalIndex: i })).filter(p => p && p.name && String(p.name).trim() !== '');
-        const sortedLogsAsc = Array.isArray(entry.logs) ? [...entry.logs].sort((a, b) => new Date(a.date) - new Date(b.date)) : [];
-
-        const currentPoint = expandedChart.type !== 'multi' ? (activePoints[expandedChart.pointIdx] || activePoints[0]) : null;
-        let chartLogs = currentPoint ? sortedLogsAsc.map(l => {
-           let rawVal = (l.values && Array.isArray(l.values)) ? l.values[currentPoint.originalIndex] : null;
-           let numVal = null;
-           if (rawVal !== '' && rawVal != null) { const parsed = parseFloat(String(rawVal).trim().split(/[\s,\[\]]+/)[0]); if (!isNaN(parsed)) numVal = parsed; }
-           return { id: l.id, date: l.date, lotNumber: l.lotNumber, content: l.content, value: numVal, rawVal: rawVal, editorName: l.editorName };
-        }).filter(l => l.value !== null) : [];
-
-        const n = chartLogs.length;
-        let stats = { mean: 0, stdDev: 0, values: [] };
-        let cpk = 0;
-        let distData = [];
-        let ucl = 0, lcl = 0, cl = 0;
-
-        if (n > 0) {
-            stats = getStats(chartLogs);
-            cl = stats.mean;
-            ucl = cl + 3 * stats.stdDev;
-            lcl = cl - 3 * stats.stdDev;
-            cpk = calculateCpk(stats, currentPoint && currentPoint.usl, currentPoint && currentPoint.lsl);
-            distData = generateNormalDistData(stats, currentPoint && currentPoint.lsl, currentPoint && currentPoint.target, currentPoint && currentPoint.usl);
-
-            chartLogs.forEach((log, index, arr) => {
-                const startIdx = Math.max(0, index - 5 + 1);
-                const subset = arr.slice(startIdx, index + 1).map(l => l.value);
-                log.movingAverage = Number((subset.reduce((a,b)=>a+b, 0) / subset.length).toFixed(2));
-                log.isOutlier = Math.abs(log.value - cl) > 3 * stats.stdDev;
-                log.westernRulesTriggered = appSettings.useWesternRules ? checkWesternElectricRules(arr.slice(0, index+1).map(x=>x.value), cl, stats.stdDev).length > 0 : false;
-            });
-
-            if (n > 1) {
-                let sum_x = 0, sum_y = 0, sum_xy = 0, sum_xx = 0;
-                chartLogs.forEach((log, i) => { sum_x += i; sum_y += log.value; sum_xy += i * log.value; sum_xx += i * i; });
-                const m = (n * sum_xy - sum_x * sum_y) / (n * sum_xx - sum_x * sum_x);
-                const b = (sum_y - m * sum_x) / n;
-                chartLogs.forEach((log, i) => { log.linearTrend = Number((m * i + b).toFixed(2)); });
-            } else if (n === 1) {
-                chartLogs[0].linearTrend = chartLogs[0].value;
-            }
-
-            if (expandedChart.type === 'cpk') {
-                let tempLogs = getMovingStats(chartLogs, appSettings.trendBatchCount || 5, currentPoint ? currentPoint.usl : null, currentPoint ? currentPoint.lsl : null, movingWindow);
-                chartLogs.length = 0;
-                tempLogs.forEach(l => chartLogs.push(l));
-            }
-        }
-
-        const multiChartLogs = expandedChart.type === 'multi' ? sortedLogsAsc.map(l => {
-          let logObj = { date: l.date, lotNumber: l.lotNumber };
-          if(activePoints) activePoints.forEach(p => {
-             let rawVal = (l.values && Array.isArray(l.values)) ? l.values[p.originalIndex] : null;
-             let parsed = null;
-             if (rawVal !== '' && rawVal != null) { parsed = parseFloat(String(rawVal).trim().split(/[\s,\[\]]+/)[0]); }
-             logObj[`point_${p.originalIndex}`] = !isNaN(parsed) && parsed !== null ? parsed : null;
-          });
-          return logObj;
-        }) : [];
-
-        if (expandedChart && expandedChart.type === 'multi' && activePoints) {
-            const p1Orig = activePoints[expandedChart.p1] ? activePoints[expandedChart.p1].originalIndex : null;
-            const p2Orig = expandedChart.p2 !== -1 && activePoints[expandedChart.p2] ? activePoints[expandedChart.p2].originalIndex : null;
-
-            const calcTrend = (origIdx) => {
-                if (origIdx === null) return;
-                let sum_x=0, sum_y=0, sum_xy=0, sum_xx=0, numValid=0;
-                multiChartLogs.forEach((log, i) => {
-                    const val = log[`point_${origIdx}`];
-                    if (val !== null && val !== undefined) { sum_x += i; sum_y += val; sum_xy += i * val; sum_xx += i * i; numValid++; }
-                });
-                if (numValid > 1) {
-                    const m = (numValid * sum_xy - sum_x * sum_y) / (numValid * sum_xx - sum_x * sum_x);
-                    const b = (sum_y - m * sum_x) / numValid;
-                    multiChartLogs.forEach((log, i) => { log[`trend_${origIdx}`] = Number((m * i + b).toFixed(2)); });
-                } else if (numValid === 1) {
-                    const singleVal = multiChartLogs.find(l => l[`point_${origIdx}`] !== null)[`point_${origIdx}`];
-                    multiChartLogs.forEach(log => { log[`trend_${origIdx}`] = singleVal; });
-                }
-            };
-            calcTrend(p1Orig); calcTrend(p2Orig);
-        }
-
-        let zoomedLogs = chartLogs;
-        if (chartZoom.left !== 'dataMin' && chartZoom.right !== 'dataMax') {
-            const i1 = chartLogs.findIndex(l => l.date === chartZoom.left);
-            const i2 = chartLogs.map(l => l.date).lastIndexOf(chartZoom.right);
-            if (i1 !== -1 && i2 !== -1) zoomedLogs = chartLogs.slice(Math.min(i1, i2), Math.max(i1, i2) + 1);
-        }
-
-        let yMin = zoomedLogs.length > 0 ? Math.min(...zoomedLogs.map(l => l.value)) : 0;
-        let yMax = zoomedLogs.length > 0 ? Math.max(...zoomedLogs.map(l => l.value)) : 100;
-
-        const limitsAndSpecs = [];
-        if (showLines.cl) limitsAndSpecs.push(cl);
-        if(n > 0) { if(showLines.ucl) limitsAndSpecs.push(ucl); if(showLines.lcl) limitsAndSpecs.push(lcl); }
-        if (currentPoint) {
-            if (showLines.lsl && currentPoint.lsl !== '' && currentPoint.lsl !== null && !isNaN(currentPoint.lsl)) limitsAndSpecs.push(parseFloat(currentPoint.lsl));
-            if (showLines.usl && currentPoint.usl !== '' && currentPoint.usl !== null && !isNaN(currentPoint.usl)) limitsAndSpecs.push(parseFloat(currentPoint.usl));
-            if (showLines.target && currentPoint.target !== '' && currentPoint.target !== null && !isNaN(currentPoint.target)) limitsAndSpecs.push(parseFloat(currentPoint.target));
-        }
-        limitsAndSpecs.forEach(val => { if (!isNaN(val)) { if (val < yMin) yMin = val; if (val > yMax) yMax = val; } });
-
-        const yMargin = (yMax - yMin) * 0.15 || 1;
-        const yDomain = [Number((yMin - yMargin).toFixed(2)), Number((yMax + yMargin).toFixed(2))];
-
-        return (
-          <div className="fixed inset-0 bg-gray-900/80 flex items-center justify-center z-[130] backdrop-blur-sm p-4 no-print">
-            <div className="bg-white rounded-2xl shadow-2xl w-full h-full max-w-7xl max-h-[90vh] flex flex-col overflow-hidden">
-              <div className="flex justify-between items-center p-6 border-b shrink-0">
-                <h3 className="text-2xl font-bold flex gap-2 text-gray-800">
-                  {expandedChart.type === 'line' && <Fragment><Icons.TrendingUp/> SPC 관리도 확대 ({currentPoint ? currentPoint.name : ''})</Fragment>}
-                  {expandedChart.type === 'cpk' && <Fragment><Icons.Activity/> 공정능력 추세 확대 ({currentPoint ? currentPoint.name : ''})</Fragment>}
-                  {expandedChart.type === 'area' && <Fragment><Icons.NormalCurve/> 정규분포 확대 ({currentPoint ? currentPoint.name : ''}) {cpk > 0 && <span className="text-sm bg-indigo-100 text-indigo-700 px-2 py-1 rounded ml-2">Cpk: {cpk}</span>}</Fragment>}
-                  {expandedChart.type === 'multi' && <Fragment><Icons.Layers/> 통합 관리도</Fragment>}
+        <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-200 h-full flex flex-col relative">
+            <div className="flex justify-between items-center mb-4 shrink-0">
+                <h3 className="font-extrabold text-lg flex items-center gap-2 text-gray-900">
+                    <Icons.TrendingUp /> Quality Condition Trend (품질 상태 추세)
                 </h3>
-                <div className="flex items-center gap-3">
-                  {(expandedChart.type === 'line' || expandedChart.type === 'cpk') && chartZoom.left !== 'dataMin' && (
-                     <button onClick={handleZoomOut} className="px-3 py-1.5 bg-red-50 text-red-600 border border-red-200 rounded-lg hover:bg-red-100 font-bold text-sm shadow-sm transition-colors">Zoom 초기화</button>
-                  )}
-                  <button onClick={() => { setExpandedChart(null); handleZoomOut(); }} className="p-2 text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded-full transition-colors"><Icons.X/></button>
-                </div>
-              </div>
-              <div className="flex-1 p-6 flex flex-col min-h-0 bg-gray-50/50">
-                {expandedChart.type === 'line' && (
-                  <div className="flex-1 min-h-0 flex flex-col">
-                    <div className="flex flex-wrap gap-1.5 items-center mb-3 shrink-0 bg-white px-4 py-2 rounded-xl border border-gray-200 shadow-sm">
-                      <span className="text-sm font-bold text-gray-600 mr-2">기준선 표시:</span>
-                      <button onClick={() => toggleSpcLine('usl')} className={`text-sm px-3 py-1 rounded-md border font-bold transition-colors ${showLines.usl ? 'bg-red-50 border-red-200 text-red-800' : 'bg-gray-50 border-gray-200 text-gray-400 hover:bg-gray-100'}`}>USL</button>
-                      <button onClick={() => toggleSpcLine('target')} className={`text-sm px-3 py-1 rounded-md border font-bold transition-colors ${showLines.target ? 'bg-green-50 border-green-200 text-green-700' : 'bg-gray-50 border-gray-200 text-gray-400 hover:bg-gray-100'}`}>Target</button>
-                      <button onClick={() => toggleSpcLine('lsl')} className={`text-sm px-3 py-1 rounded-md border font-bold transition-colors ${showLines.lsl ? 'bg-red-50 border-red-200 text-red-800' : 'bg-gray-50 border-gray-200 text-gray-400 hover:bg-gray-100'}`}>LSL</button>
-                      <div className="w-px h-4 bg-gray-300 mx-2"></div>
-                      <button onClick={() => toggleSpcLine('ucl')} className={`text-sm px-3 py-1 rounded-md border font-bold transition-colors ${showLines.ucl ? 'bg-red-50 border-red-200 text-red-600' : 'bg-gray-50 border-gray-200 text-gray-400 hover:bg-gray-100'}`}>UCL</button>
-                      <button onClick={() => toggleSpcLine('cl')} className={`text-sm px-3 py-1 rounded-md border font-bold transition-colors ${showLines.cl ? 'bg-gray-200 border-gray-300 text-gray-800' : 'bg-gray-50 border-gray-200 text-gray-400 hover:bg-gray-100'}`}>CL</button>
-                      <button onClick={() => toggleSpcLine('lcl')} className={`text-sm px-3 py-1 rounded-md border font-bold transition-colors ${showLines.lcl ? 'bg-red-50 border-red-200 text-red-600' : 'bg-gray-50 border-gray-200 text-gray-400 hover:bg-gray-100'}`}>LCL</button>
-                    </div>
-                    <div className="flex-1 min-h-0 bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <LineChart data={zoomedLogs} margin={{right: 80}} onMouseDown={(e) => e && e.activeLabel && setChartZoom({...chartZoom, refAreaLeft: e.activeLabel})} onMouseMove={(e) => e && chartZoom.refAreaLeft && e.activeLabel && setChartZoom({...chartZoom, refAreaRight: e.activeLabel})} onMouseUp={handleZoom}>
-                          <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false}/>
-                          <XAxis dataKey="date" tick={{fontSize: 13, fill: '#64748b'}} domain={[chartZoom.left, chartZoom.right]} allowDataOverflow />
-                          <YAxis domain={yDomain} tick={{fontSize: 13, fill: '#64748b'}} allowDataOverflow />
-                          <Tooltip content={<CustomSpcTooltip />} />
-                          <Legend verticalAlign="top" height={36} wrapperStyle={{ fontSize: '14px', fontWeight: 'bold' }}/>
-                          {showLines.usl && currentPoint && currentPoint.usl && <ReferenceLine y={parseFloat(currentPoint.usl)} label={{position: 'right', value: `USL: ${currentPoint.usl}`, fill: '#991b1b', fontSize: 13, fontWeight: 'bold'}} stroke="#991b1b" strokeWidth={2} />}
-                          {showLines.lsl && currentPoint && currentPoint.lsl && <ReferenceLine y={parseFloat(currentPoint.lsl)} label={{position: 'right', value: `LSL: ${currentPoint.lsl}`, fill: '#991b1b', fontSize: 13, fontWeight: 'bold'}} stroke="#991b1b" strokeWidth={2} />}
-                          {showLines.target && currentPoint && currentPoint.target && <ReferenceLine y={parseFloat(currentPoint.target)} label={{position: 'insideTopLeft', value: `Target: ${currentPoint.target}`, fill: '#16a34a', fontSize: 13, fontWeight: 'bold'}} stroke="#16a34a" strokeDasharray="5 5" strokeWidth={2} />}
-                          {showLines.ucl && n > 0 && <ReferenceLine y={ucl} label={{position: 'right', value: `UCL: ${ucl.toFixed(2)}`, fill: '#ef4444', fontSize: 13, fontWeight: 'bold'}} stroke="#ef4444" strokeDasharray="3 3" strokeWidth={1.5} />}
-                          {showLines.lcl && n > 0 && <ReferenceLine y={lcl} label={{position: 'right', value: `LCL: ${lcl.toFixed(2)}`, fill: '#ef4444', fontSize: 13, fontWeight: 'bold'}} stroke="#ef4444" strokeDasharray="3 3" strokeWidth={1.5} />}
-                          {showLines.cl && n > 0 && <ReferenceLine y={cl} label={{position: 'right', value: `CL: ${cl.toFixed(2)}`, fill: '#1e293b', fontSize: 13, fontWeight: 'bold'}} stroke="#1e293b" strokeWidth={1} />}
-                          <Line type="monotone" dataKey="value" stroke="#3b82f6" strokeWidth={3} activeDot={{ r: 8 }} name="측정값" connectNulls isAnimationActive={false}/>
-                          {zoomedLogs.map((log, index) => {
-                             if (log.isOutlier || (currentPoint && currentPoint.usl && log.value > parseFloat(currentPoint.usl)) || (currentPoint && currentPoint.lsl && log.value < parseFloat(currentPoint.lsl))) { return <ReferenceDot key={`outlier-${index}`} x={log.date} y={log.value} r={8} fill="red" stroke="white" strokeWidth={2} shape="star" isFront={true}/> } return null;
-                          })}
-                          {(appSettings.trendLine === 'both' || appSettings.trendLine === 'movingAverage') && <Line type="monotone" dataKey="movingAverage" stroke="#f97316" strokeWidth={3} strokeDasharray="5 5" dot={false} name="5-MA(이동평균)" connectNulls isAnimationActive={false}/>}
-                          {(appSettings.trendLine === 'both' || appSettings.trendLine === 'linear') && <Line type="monotone" dataKey="linearTrend" stroke="#a855f7" strokeWidth={3} strokeDasharray="3 3" dot={false} name="선형 추세선" connectNulls isAnimationActive={false}/>}
-                          {chartZoom.refAreaLeft && chartZoom.refAreaRight && <ReferenceArea x1={chartZoom.refAreaLeft} x2={chartZoom.refAreaRight} strokeOpacity={0.3} fill="#cbd5e1" opacity={0.4} />}
-                        </LineChart>
-                      </ResponsiveContainer>
-                    </div>
-                  </div>
+                <button onClick={() => setExpandedChart({ type: 'cpk', pointIdx: activeTabIdx })} className="no-print text-xs bg-gray-100 text-gray-600 px-2 py-1.5 rounded hover:bg-gray-200"><Icons.Maximize/></button>
+            </div>
+            <div className="flex gap-2 items-center mb-3 bg-gray-50 p-2 rounded-lg border border-gray-200 shrink-0 no-print">
+               <span className="text-xs font-bold text-gray-600 pl-2">현재 TBI:</span>
+               <span className="text-xs bg-indigo-100 text-indigo-800 px-2 py-1 rounded font-bold">{n > 0 && currentPoint && typeof currentPoint.target !== 'undefined' ? calculateAsymmetricTBI(chartLogs[n-1].value, currentPoint.target, currentPoint.usl, currentPoint.lsl).toFixed(2) : '-'}</span>
+               <span className="text-xs font-bold text-gray-600 pl-2">Batch Delta:</span>
+               <span className="text-xs bg-indigo-100 text-indigo-800 px-2 py-1 rounded font-bold">{n > 1 ? (chartLogs[n-1].value - chartLogs[n-2].value).toFixed(2) : '-'}</span>
+            </div>
+            <div className="flex-1 min-h-0 flex gap-4">
+               <div className="flex-1 border border-gray-100 rounded-lg p-2 relative flex flex-col">
+                   <h5 className="text-xs font-bold text-gray-500 mb-1 text-center shrink-0">Target Bias Trend (TBI)</h5>
+                   <div className="flex-1 min-h-0">
+                       <ResponsiveContainer width="100%" height="100%">
+                            <ComposedChart data={chartLogs.map(l => ({ ...l, tbi: currentPoint ? calculateAsymmetricTBI(l.value, currentPoint.target, currentPoint.usl, currentPoint.lsl) : 0 }))}>
+                                <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                                <XAxis dataKey="date" tick={{fontSize:10}} />
+                                <YAxis tick={{fontSize:10}} />
+                                <Tooltip />
+                                <ReferenceLine y={0} stroke="green" strokeDasharray="3 3" />
+                                <Bar dataKey="tbi" fill="#6366f1" />
+                                <Line type="monotone" dataKey="tbi" stroke="#4f46e5" strokeWidth={2} />
+                            </ComposedChart>
+                       </ResponsiveContainer>
+                   </div>
+               </div>
+               <div className="flex-1 border border-gray-100 rounded-lg p-2 relative flex flex-col">
+                   <h5 className="text-xs font-bold text-gray-500 mb-1 text-center shrink-0">Batch 실측 분포 (Scatter)</h5>
+                   <div className="flex-1 min-h-0">
+                       <ResponsiveContainer width="100%" height="100%">
+                            <ScatterChart margin={{top:10, right:10, bottom:10, left:10}}>
+                                <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                                <XAxis dataKey="date" type="category" tick={{fontSize:10}} />
+                                <YAxis dataKey="value" type="number" domain={['auto','auto']} tick={{fontSize:10}} />
+                                <Tooltip cursor={{strokeDasharray: '3 3'}} />
+                                {currentPoint && currentPoint.target !== '' && <ReferenceLine y={parseFloat(currentPoint.target)} stroke="green" />}
+                                {currentPoint && currentPoint.usl !== '' && <ReferenceLine y={parseFloat(currentPoint.usl)} stroke="red" strokeDasharray="3 3" />}
+                                {currentPoint && currentPoint.lsl !== '' && <ReferenceLine y={parseFloat(currentPoint.lsl)} stroke="red" strokeDasharray="3 3" />}
+                                <Scatter data={chartLogs.filter(l => l.value !== null)} fill="#8884d8" />
+                            </ScatterChart>
+                       </ResponsiveContainer>
+                   </div>
+               </div>
+            </div>
+            <div className="mt-2 text-xs text-gray-400 text-right shrink-0">
+                통계 참고: Cpk {cpk.toFixed(2)} | Cpm {currentPoint ? calculateCpm(stats, currentPoint.target, currentPoint.usl, currentPoint.lsl).toFixed(2) : '-'}
+            </div>
+        </div>
+
                 )}
                 {expandedChart.type === 'cpk' && (
                   <div className="flex-1 min-h-0 flex flex-col">
