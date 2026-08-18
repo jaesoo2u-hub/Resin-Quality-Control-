@@ -97,7 +97,7 @@
 
     const getStats = (logs) => {
       if (!logs || logs.length === 0) return { mean: 0, stdDev: 0, values: [] };
-      const values = logs.map(l => parseFloat(l.value)).filter(v => !isNaN(v));
+      const values = logs.map(l => parseFloat(l.value)).filter(v => Number.isFinite(v));
       if (values.length === 0) return { mean: 0, stdDev: 0, values: [] };
       const mean = values.reduce((a, b) => a + b, 0) / values.length;
       const stdDev = values.length > 1 ? Math.sqrt(values.map(x => Math.pow(x - mean, 2)).reduce((a, b) => a + b) / (values.length - 1)) : 0;
@@ -738,6 +738,12 @@ ${decision}
       const [newProfileForm, setNewProfileForm] = useState({ name: '', profile: 'Target 중심 관리형', warningMargin: 15, criticalMargin: 5 });
 
       const [entries, setEntries] = useState([]);
+      const [auditLogs, setAuditLogs] = useState([]);
+      const clientId = useMemo(() => {
+          let id = localStorage.getItem('qualityAppClientId');
+          if (!id) { id = 'client_' + Math.random().toString(36).substr(2, 9); localStorage.setItem('qualityAppClientId', id); }
+          return id;
+      }, []);
       const [expandedChart, setExpandedChart] = useState(null);
       const [chartZoom, setChartZoom] = useState({ refAreaLeft: '', refAreaRight: '', left: 'dataMin', right: 'dataMax' });
       const [showLines, setShowLines] = useState({ usl: true, lsl: true, target: true, ucl: true, lcl: true, cl: true });
@@ -768,8 +774,33 @@ ${decision}
       const [imageViewerState, setImageViewerState] = useState({ isOpen: false, images: [], currentIndex: 0 });
 
       const [excelState, setExcelState] = useState({
-        isOpen: false, headers: [], data: [], mapping: { date: '', lotNumber: '', content: '', points: {} }, duplicateCriteria: 'date_lot'
+        isOpen: false, headers: [], data: [], mapping: { date: '', lotNumber: '', content: '', points: {} }, duplicateCriteria: 'date_lot', selectedResinCol: '', selectedResinVal: '', selectedPoints: []
       });
+
+      const defaultTerms = [
+          { name: 'Cpk', category: '공정능력', definition: '단기 공정 능력 지수. 공정의 산포와 평균의 규격 중심으로부터의 치우침을 함께 고려하여 실제 규격 내 안정성을 평가하는 지표.', resinApp: '최근 Batch/LOT의 물성이 규격 내에 안정적으로 들어오는지 평가하며, 단순히 규격을 만족하는지뿐 아니라 평균이 규격 한쪽으로 치우쳐 있는지도 판단.', systemUsage: '현재 프로그램에서는 통계 참고지표로 사용하며, Smart Analysis의 핵심 패턴 판정은 Cpk 하나에 의존하지 않습니다.', interpretation: 'Cpk가 낮으면 공정 산포가 크거나 평균이 규격 중심에서 벗어나 있어 Spec-Out 위험이 증가함.', isVisible: true, order: 1 },
+          { name: 'Cpm', category: '공정능력', definition: 'Target 중심 공정 능력 지수. 규격 만족뿐 아니라 목표값(Target)으로부터의 거리까지 고려하여 공정의 목표 적합성을 평가.', resinApp: '규격 이탈은 없더라도 목표 점도, 고형분 등의 Target에서 지속적으로 벗어나는 운전 편차를 감지.', systemUsage: '현재 프로그램에서는 Target 관련 보조 통계지표로 활용하며, Smart Analysis의 핵심 패턴 판정은 TBI와 Batch 변화 등을 중심으로 수행합니다.', interpretation: 'Cpk는 높지만 Cpm이 낮다면 산포는 비교적 작지만 Target에서 멀어진 상태일 수 있음.', isVisible: true, order: 2 },
+          { name: 'Sigma', category: '공정능력', definition: '데이터의 표준편차로 공정 데이터가 평균을 중심으로 얼마나 퍼져 있는지를 나타내는 산포 지표.', resinApp: 'Batch 간 점도, 고형분, 산가 등의 물성이 얼마나 들쭉날쭉한지를 평가.', systemUsage: '최근 Batch의 산포와 전체 데이터의 변동성을 파악하는 참고지표로 활용합니다.', interpretation: 'Sigma가 커질수록 공정 변동성이 증가한 것으로 판단.', isVisible: true, order: 3 },
+          { name: 'UCL / LCL', category: '통계적 관리', definition: '관리상한선/관리하한선. 공정의 통계적 자연 변동 범위를 판단하기 위한 관리한계.', resinApp: '고객 규격인 USL/LSL과 별개로 우리 공정 자체의 정상적인 변동 범위를 판단.', systemUsage: 'SPC 관리도에서 통계적 관리한계로 표시되며, 평소 변동과 다른 신호를 확인하는 데 활용합니다.', interpretation: '관리한계를 벗어나는 점은 특별원인 발생 가능성을 확인해야 함.', isVisible: true, order: 4 },
+          { name: 'Western Rule', category: '통계적 관리', definition: '관리도에서 비정상적인 데이터 패턴을 탐지하기 위한 통계적 판정 규칙.', resinApp: '아직 Spec-Out은 아니지만 공정이 비정상적으로 이동하고 있는 전조를 조기에 탐지.', systemUsage: '현재 프로그램에서는 여러 Western Electric Rule 패턴을 참고지표로 계산합니다.', interpretation: '규칙 발동 시 원료, 설비, 작업조건, 온도, 투입량 등의 특별원인을 확인.', isVisible: true, order: 5 },
+          { name: 'Moving Average', category: '통계적 관리', definition: '최근 일정 개수의 데이터를 평균하여 단기적인 흐름을 부드럽게 보는 방법입니다.', resinApp: '최근 3~5 Batch 등의 평균 변화를 통해 일시적인 한 점보다 최근 공정 방향을 파악하는 데 활용합니다.', systemUsage: '최근 Batch 흐름 분석에 활용합니다.', interpretation: '단기 추세를 보는 데 도움이 되지만 데이터가 적을 경우 과도한 해석을 피합니다.', isVisible: true, order: 6 },
+          { name: 'Spec-Out', category: '이상 상태', definition: '측정값이 규격 상한 또는 하한을 벗어난 상태입니다.', resinApp: '해당 Batch가 제품의 설정 품질 규격을 벗어난 상태이며 QA 확인이 필요한 직접적인 이상 신호입니다.', systemUsage: 'Smart Analysis의 최우선 상태 판정으로 사용합니다.', interpretation: 'Spec-Out 자체는 확인이 필요한 상태이며 최종 조치 여부는 QA 판단에 따릅니다.', isVisible: true, order: 7 },
+          { name: 'PSI', category: '내부 분석', definition: '본 프로그램에서 사용하는 내부 공정 안정성 종합지표.', resinApp: 'Cpk, 이상치, Western Rule, 추세 등의 정보를 종합하여 공정 위험도를 직관적으로 판단.', systemUsage: '기존 품질관리 화면과 이력 호환성을 위해 내부 종합지표로 사용됩니다. Smart Analysis의 Internal Risk Score와는 별개의 지표입니다.', interpretation: '점수가 낮을수록 공정 안정성 및 품질 위험이 높다고 판단.', isVisible: true, order: 8 },
+          { name: 'TBI', category: '내부 분석', definition: 'Target Bias Index. Target 대비 현재 공정값이 어느 방향으로 얼마나 치우쳐 있는지를 나타내는 내부 지표.', resinApp: '비대칭 규격에서도 현재 Batch가 Target 기준 어느 방향으로 이동하고 있는지를 판단.', systemUsage: 'Quality Condition Trend 및 Smart Analysis의 핵심 Target 편향 지표로 사용합니다.', interpretation: '0에 가까울수록 Target에 가까우며 절대값이 커질수록 Target에서 멀어진 상태.', isVisible: true, order: 9 },
+          { name: 'Baseline', category: '내부 분석', definition: '정상적인 과거 상태와 비교하기 위한 기준 데이터 집합입니다.', resinApp: '동일 제품/항목의 과거 정상 Batch가 현재 Batch와 비교했을 때 평소 범위인지 판단하기 위한 기준입니다.', systemUsage: '충분한 과거 데이터가 확보된 경우 정상 패턴 비교에 활용합니다.', interpretation: 'Baseline이 없으면 장기 정상 상태 판단 신뢰도가 낮아지고 최근 변화 중심으로 분석합니다.', isVisible: true, order: 10 },
+          { name: 'Sudden Jump', category: '내부 분석', definition: '직전 Batch 또는 측정값 대비 급격한 값의 변화.', resinApp: '계량 오류, 온도 변화, 원료 이상, 공정조건 변경 등으로 갑작스러운 물성 변화가 발생했는지 확인.', systemUsage: '직전 Batch와의 변화량을 Typical Variation과 비교하여 급격한 변화 여부를 판단합니다.', interpretation: '일시적 이상인지 지속적인 공정 변화인지 추가 확인 필요.', isVisible: true, order: 11 },
+          { name: 'Target Drift', category: '내부 분석', definition: '시간이 지나면서 측정값이 일정 방향으로 서서히 이동하는 현상.', resinApp: '설비 상태 변화, 원료 변화, 계절적 영향, 공정조건 변화 등에 의해 물성이 지속적으로 Target에서 이동하는 현상.', systemUsage: '최근 3~5 Batch의 방향성, Target Bias 변화 및 과거 정상 Baseline과의 차이를 종합하여 판단합니다.', interpretation: 'Spec-Out 이전에 선제적인 보정이 필요한 대표적인 전조 현상.', isVisible: true, order: 12 },
+          { name: 'Spread Increase', category: '내부 분석', definition: '공정 변동 또는 산포가 과거보다 증가하는 현상입니다.', resinApp: '동일 수지를 생산해도 Batch 간 편차가 점점 커지는 상태입니다.', systemUsage: '최근 5 Batch의 산포와 Baseline 또는 과거 변동성을 비교하는 데 활용합니다.', interpretation: '평균 중심이 정상이어도 산포가 커지면 공정 안정성이 저하될 수 있습니다.', isVisible: true, order: 13 },
+          { name: 'Target Approach', category: '내부 분석', definition: '측정값이 목표값보다 규격 한계 방향으로 접근하는 상태입니다.', resinApp: '현재 규격 이탈은 아니지만 Target에서 멀어지고 있어 향후 Spec-Out 위험이 커질 수 있는 상태입니다.', systemUsage: 'TBI가 임계 수준에 접근할 때 참고 패턴으로 사용합니다.', interpretation: '현재 불량이라는 의미가 아니라 주의 및 모니터링이 필요한 상태입니다.', isVisible: true, order: 14 },
+          { name: 'Internal Risk Score', category: '내부 분석', definition: '현재 프로그램에서 여러 이상징후를 종합해 내부적으로 표시하는 위험도 점수입니다.', resinApp: 'Spec-Out, Sudden Jump, Drift, Spread Increase, Target 편향 등을 종합해 QA가 현재 상태를 빠르게 파악하도록 지원합니다.', systemUsage: 'AI 품질 변화 위험도를 0~100 범위로 표현합니다.', interpretation: '공식 품질지표가 아니며 QA 의사결정을 지원하는 보조지표입니다.', isVisible: true, order: 15 }
+      ];
+
+      const [qualityAppTerms, setQualityAppTerms] = useState(() => {
+          const saved = localStorage.getItem('qualityAppTerms');
+          return saved ? JSON.parse(saved) : defaultTerms;
+      });
+
+      const [termsModalState, setTermsModalState] = useState({ isOpen: false, editMode: false, editingTerm: null, highlightedTermName: null });
 
 
       const handleImageUpload = async (e, isEditMode = false) => {
@@ -839,29 +870,32 @@ ${decision}
           if (data.length > 0) {
             const headers = Object.keys(data[0]);
             const entry = entries.find(en => en.id === selectedId);
-            const activePoints = entry ? entry.points.map((p, i) => ({ ...p, originalIndex: i })).filter(p => p.name.trim() !== '') : [];
+            const activePoints = entry ? (entry.points || []).map((p, i) => ({ ...p, originalIndex: i })).filter(p => p && p.name && String(p.name).trim() !== '') : [];
             const mapping = { date: '', lotNumber: '', content: '', points: {} };
+            let selectedResinCol = '';
             headers.forEach(h => {
               const hl = h.toLowerCase();
               if (hl.includes('일') || hl.includes('date')) mapping.date = h;
               if (hl.includes('lot') || hl.includes('로트')) mapping.lotNumber = h;
               if (hl.includes('조치') || hl.includes('비고') || hl.includes('내용')) mapping.content = h;
+              if (hl.includes('수지') || hl.includes('제품') || hl.includes('품명') || hl.includes('resin') || hl.includes('product')) selectedResinCol = h;
               activePoints.forEach(p => { if (h.includes(p.name)) mapping.points[p.originalIndex] = h; });
             });
-            setExcelState(prev => ({ ...prev, isOpen: true, headers, data, mapping }));
+            setExcelState(prev => ({ ...prev, isOpen: true, headers, data, mapping, selectedResinCol, selectedResinVal: '', selectedPoints: activePoints.map(p => p.originalIndex) }));
           }
         };
         reader.readAsBinaryString(file); e.target.value = null;
       };
 
       const handleImportExcelData = (importMode) => {
-        const { data, mapping, duplicateCriteria } = excelState;
+        const { data, mapping, duplicateCriteria, selectedResinCol, selectedResinVal, selectedPoints } = excelState;
         if (!mapping.date) { showToast("측정일(Date) 매핑은 필수입니다."); return; }
         const entry = entries.find(en => en.id === selectedId);
-        const activePoints = entry.points.map((p, i) => ({ ...p, originalIndex: i })).filter(p => p.name.trim() !== '');
+        const activePoints = (entry.points || []).map((p, i) => ({ ...p, originalIndex: i })).filter(p => p && p.name && String(p.name).trim() !== '' && selectedPoints.includes(i));
         const parsedLogs = [];
 
         data.forEach((row, index) => {
+          if (selectedResinCol && selectedResinVal && String(row[selectedResinCol] || '').trim() !== selectedResinVal) return;
           let parsedDate = parsePastedDate(String(row[mapping.date] || '')) || new Date().toISOString().split('T')[0];
           let lotNum = mapping.lotNumber ? String(row[mapping.lotNumber] || '').trim() : '';
           const valuesArr = Array(entry.points.length).fill('');
@@ -901,6 +935,17 @@ ${decision}
 
       const showToast = (msg) => { setToastMsg(msg); setTimeout(() => setToastMsg(null), 3000); };
 
+      const addAuditLog = (action, details) => {
+          const newLog = {
+              id: Date.now().toString(),
+              timestamp: new Date().toISOString(),
+              action,
+              user: userName || 'Unknown',
+              details
+          };
+          setAuditLogs(prev => [newLog, ...prev]);
+      };
+
       useEffect(() => {
         if (appSettings.theme === 'dark') document.body.classList.add('dark-theme-filter');
         else document.body.classList.remove('dark-theme-filter');
@@ -927,7 +972,7 @@ ${decision}
           if (view !== 'details' || !selectedId) { showToast("상세 기록 화면에서만 엑셀 출력이 가능합니다."); return; }
           const entry = entries.find(e => e.id === selectedId);
           if (!entry || !entry.logs || entry.logs.length === 0) { showToast("출력할 데이터가 없습니다."); return; }
-          const activePoints = entry.points.map((p, i) => ({ ...p, originalIndex: i })).filter(p => p.name.trim() !== '');
+          const activePoints = (entry.points || []).map((p, i) => ({ ...p, originalIndex: i })).filter(p => p && p.name && String(p.name).trim() !== '');
           const exportData = entry.logs.map(log => {
               const row = { '측정일': log.date, 'LOT 번호': log.lotNumber };
               activePoints.forEach(p => { row[p.name] = log.values[p.originalIndex]; });
@@ -943,7 +988,7 @@ ${decision}
       };
 
       const exportDataJSON = () => {
-          const fullData = { entries, settings: appSettings, profiles: productProfiles, histories: analysisHistories };
+          const fullData = { entries, auditLogs, settings: appSettings, profiles: productProfiles, histories: analysisHistories, terms: qualityAppTerms };
           const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(fullData, null, 2));
           const dlAnchor = document.createElement('a'); dlAnchor.setAttribute("href", dataStr); dlAnchor.setAttribute("download", `QC_Backup_${new Date().toISOString().split('T')[0]}.json`);
           document.body.appendChild(dlAnchor); dlAnchor.click(); dlAnchor.remove(); showToast("전체 백업 다운로드 완료");
@@ -957,11 +1002,14 @@ ${decision}
               try {
                   const data = JSON.parse(evt.target.result);
                   if (data.entries) setEntries(data.entries);
+                  if (data.auditLogs) setAuditLogs(data.auditLogs);
                   if (data.settings) { setAppSettings(data.settings); localStorage.setItem('qualityAppSettingsV3', JSON.stringify(data.settings)); }
                   if (data.profiles) { setProductProfiles(data.profiles); localStorage.setItem('qualityAppProfiles', JSON.stringify(data.profiles)); }
                   if (data.histories) { setAnalysisHistories(data.histories); localStorage.setItem('qualityAppHistories', JSON.stringify(data.histories)); }
+                  if (data.terms) { setQualityAppTerms(data.terms); localStorage.setItem('qualityAppTerms', JSON.stringify(data.terms)); }
                   if (isConnected && canEdit) writeDataToFile(fileHandle, data.entries || entries, lockInfo);
                   showToast("백업 데이터 복원 완료");
+                  addAuditLog('BACKUP_RESTORE', `백업 데이터 복원 실행`);
               } catch (err) {
                   setModalConfig({ type: 'info', message: '유효하지 않은 백업 파일 형식입니다.' });
               }
@@ -1001,16 +1049,17 @@ ${decision}
       const loadDataFromFile = async (handle) => {
         const file = await handle.getFile();
         const text = await file.text();
-        let data = { entries: [], lockInfo: { isEditing: false, editorName: '' } };
+        let data = { entries: [], lockInfo: { isEditing: false, editorName: '' }, auditLogs: [] };
         if (text) { try { data = JSON.parse(text); } catch(e){} }
         setEntries(data.entries || []);
+        if (data.auditLogs) setAuditLogs(data.auditLogs);
         const currentLock = data.lockInfo || { isEditing: false, editorName: '' };
         setLockInfo(currentLock);
         if (currentLock.isEditing && currentLock.editorName === userName) setCanEdit(true); else setCanEdit(false);
       };
 
       const writeDataToFile = async (handle, dataEntries, lockData) => {
-        const contentStr = JSON.stringify({ entries: dataEntries, lockInfo: lockData }, null, 2);
+        const contentStr = JSON.stringify({ entries: dataEntries, lockInfo: lockData, auditLogs }, null, 2);
         if (isIframeFallback || !handle) { localStorage.setItem('quality_data_fallback', contentStr); return; }
         const writable = await handle.createWritable();
         await writable.write(contentStr); await writable.close();
@@ -1036,6 +1085,7 @@ ${decision}
         const newLockInfo = { isEditing: true, editorName: userName, startTime: Date.now() };
         await writeDataToFile(fileHandle, currentData.entries || entries, newLockInfo);
         setLockInfo(newLockInfo); setCanEdit(true); showToast("편집 권한을 획득했습니다.");
+        addAuditLog('LOCK_ACQUIRE', `편집 권한 획득`);
       };
 
       const saveAndUnlock = async (currentEntries) => {
@@ -1051,13 +1101,14 @@ ${decision}
             const newLockInfo = { isEditing: false, editorName: '', startTime: null };
             await writeDataToFile(fileHandle, entries, newLockInfo);
             setLockInfo(newLockInfo); setCanEdit(false); showToast("초기화 완료"); setModalConfig({ type: null });
+            addAuditLog('LOCK_FORCE_RESET', `강제 잠금 해제 실행`);
         }});
       };
 
       const handleRefresh = async () => {
          if (isIframeFallback) {
              const fallbackText = localStorage.getItem('quality_data_fallback');
-             if (fallbackText) { const data = JSON.parse(fallbackText); setEntries(data.entries || []); setLockInfo(data.lockInfo || { isEditing: false, editorName: '' }); showToast("새로고침 완료."); }
+             if (fallbackText) { const data = JSON.parse(fallbackText); setEntries(data.entries || []); if (data.auditLogs) setAuditLogs(data.auditLogs); setLockInfo(data.lockInfo || { isEditing: false, editorName: '' }); showToast("새로고침 완료."); }
              return;
          }
          if (fileHandle) { await loadDataFromFile(fileHandle); showToast("데이터 갱신 완료"); }
@@ -1234,6 +1285,56 @@ ${decision}
                  </div>
                </div>
             </div>
+
+            <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 mt-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-bold text-lg text-indigo-700 flex items-center gap-2"><Icons.Info/> 품질관리 용어 관리</h3>
+                <button onClick={() => setTermsModalState({...termsModalState, isOpen: true, editMode: true})} className="text-sm bg-indigo-50 text-indigo-700 px-4 py-2 rounded-lg font-bold hover:bg-indigo-100 transition-colors border border-indigo-200 shadow-sm">용어 관리 및 수정</button>
+              </div>
+              <p className="text-sm text-gray-600 mb-4">앱 전체에서 사용되는 품질관리 용어의 정의와 해석 가이드를 사용자 맞춤형으로 편집할 수 있습니다. 수정한 내용은 앱 내 가이드와 도움말 툴팁에 적용됩니다.</p>
+              <div className="flex flex-wrap gap-2">
+                {qualityAppTerms.map(t => (
+                  <span key={t.name} className={`text-xs px-2.5 py-1 rounded-full border font-bold ${t.isVisible ? 'bg-white text-gray-700 border-gray-300' : 'bg-gray-100 text-gray-400 border-gray-200 line-through'}`}>{t.name}</span>
+                ))}
+              </div>
+            </div>
+
+            <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200 mt-6">
+              <div className="flex items-center gap-2 mb-4 pb-2 border-b border-gray-100">
+                <Icons.Activity className="text-gray-500"/>
+                <h3 className="font-extrabold text-gray-800 text-lg">시스템 감사 로그 (Audit Log)</h3>
+              </div>
+              <div className="text-sm text-gray-500 mb-4 bg-gray-50 p-3 rounded-lg flex items-center gap-2">
+                <Icons.Info className="text-blue-500 w-4 h-4"/>
+                현재 클라이언트 ID: <span className="font-mono text-gray-800 font-bold">{clientId}</span>
+              </div>
+              <div className="overflow-x-auto border border-gray-200 rounded-xl max-h-64 overflow-y-auto">
+                <table className="min-w-full text-sm">
+                  <thead className="bg-gray-100 sticky top-0">
+                    <tr>
+                      <th className="px-4 py-3 text-left font-bold text-gray-600 border-b">시간</th>
+                      <th className="px-4 py-3 text-left font-bold text-gray-600 border-b">액션</th>
+                      <th className="px-4 py-3 text-left font-bold text-gray-600 border-b">사용자</th>
+                      <th className="px-4 py-3 text-left font-bold text-gray-600 border-b">상세 내용</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100 bg-white">
+                    {auditLogs.length === 0 ? (
+                        <tr><td colSpan="4" className="px-4 py-8 text-center text-gray-400">기록된 시스템 로그가 없습니다.</td></tr>
+                    ) : (
+                        auditLogs.map(log => (
+                           <tr key={log.id} className="hover:bg-gray-50 transition-colors">
+                             <td className="px-4 py-2 text-gray-500 font-mono text-xs">{new Date(log.timestamp).toLocaleString()}</td>
+                             <td className="px-4 py-2 font-bold text-indigo-700">{log.action}</td>
+                             <td className="px-4 py-2 text-gray-600">{log.user}</td>
+                             <td className="px-4 py-2 text-gray-800">{log.details}</td>
+                           </tr>
+                        ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           </div>
         </div>
       );
@@ -1325,6 +1426,7 @@ ${decision}
         const entry = { ...newEntry, id: Date.now(), status: '진행중', logs: [] };
         updateAndSync([entry, ...entries]); setView('dashboard');
         setNewEntry({ resinName: '', type: '부적합 대책', processProfile: appSettings.defaultProfile, cause: '', startDate: new Date().toISOString().split('T')[0], endDate: '', points: [{ name: '', lsl: '', target: '', usl: '' }, { name: '', lsl: '', target: '', usl: '' }] });
+        addAuditLog('CREATE', `이력 생성: ${entry.resinName} / ${entry.type}`);
       };
 
       const handleAddLog = () => {
@@ -1334,14 +1436,17 @@ ${decision}
         const entry = entries.find(e => e.id === selectedId);
         const pointCount = entry && entry.points ? entry.points.length : 5;
         setNewLog({ date: new Date().toISOString().split('T')[0], lotNumber: '', values: Array(pointCount).fill(''), content: '', images: [] });
+        if (entry) addAuditLog('CREATE', `측정 기록 추가 (수지: ${entry.resinName})`);
       };
 
       const triggerAction = (type, targetId) => {
         let message = type === 'close' ? '종료하시겠습니까?' : type === 'delete' ? '삭제하시겠습니까?' : '재개하시겠습니까?';
         setModalConfig({ type: 'confirm', message, onConfirm: () => {
-            if (type === 'close') updateAndSync(entries.map(e => e.id === targetId ? { ...e, status: '종료' } : e));
-            else if (type === 'delete') { updateAndSync(entries.filter(e => e.id !== targetId)); if (selectedId === targetId) setView('dashboard'); }
-            else if (type === 'reopen') updateAndSync(entries.map(e => e.id === targetId ? { ...e, status: '진행중' } : e));
+            const entry = entries.find(e => e.id === targetId);
+            const targetName = entry ? entry.resinName : '알 수 없음';
+            if (type === 'close') { updateAndSync(entries.map(e => e.id === targetId ? { ...e, status: '종료' } : e)); addAuditLog('UPDATE', `이력 종료: ${targetName}`); }
+            else if (type === 'delete') { updateAndSync(entries.filter(e => e.id !== targetId)); if (selectedId === targetId) setView('dashboard'); addAuditLog('DELETE', `이력 삭제: ${targetName}`); }
+            else if (type === 'reopen') { updateAndSync(entries.map(e => e.id === targetId ? { ...e, status: '진행중' } : e)); addAuditLog('UPDATE', `이력 재개: ${targetName}`); }
             setModalConfig({ type: null });
         }});
       };
@@ -1382,7 +1487,7 @@ ${decision}
 
          entries.forEach(entry => {
              if(entry.status === '종료') return;
-             const activePoints = entry.points.filter(p => p.name.trim() !== '');
+             const activePoints = (entry.points || []).filter(p => p && p.name && String(p.name).trim() !== '');
              const sortedLogs = [...(entry.logs || [])].sort((a,b)=>new Date(a.date)-new Date(b.date));
              if (sortedLogs.length > 0) {
                  const currentLatest = sortedLogs[sortedLogs.length - 1].date;
@@ -1392,7 +1497,7 @@ ${decision}
              activePoints.forEach(p => {
                  totalPoints++;
                  const vals = sortedLogs.map(l => {
-                    const rawVal = l.values[entry.points.indexOf(p)];
+                    const rawVal = (l.values && Array.isArray(l.values)) ? l.values[entry.points.indexOf(p)] : null;
                     if(rawVal !== '' && rawVal != null) { const parsed = parseFloat(String(rawVal).trim().split(/[\s,\[\]]+/)[0]); if(!isNaN(parsed)) return parsed; }
                     return null;
                  }).filter(v => v !== null);
@@ -1492,8 +1597,8 @@ ${decision}
           <div className="grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {filteredEntries.length === 0 ? <div className="col-span-full py-12 text-center bg-white rounded-xl border border-dashed border-gray-300 text-gray-400">등록된 데이터가 없습니다.</div> : (
               filteredEntries.map(entry => {
-                const activePointsStr = entry.points && entry.points.filter(p => p.name.trim() !== '').map(p => p.name).join(', ');
-                const activePoints = entry.points && entry.points.map((p, i) => ({ ...p, originalIndex: i })).filter(p => p.name.trim() !== '');
+                const activePointsStr = (entry.points || []).filter(p => p && p.name && String(p.name).trim() !== '').map(p => p.name).join(', ');
+                const activePoints = (entry.points || []).map((p, i) => ({ ...p, originalIndex: i })).filter(p => p && p.name && String(p.name).trim() !== '');
 
                 let psiSum = 0; let psiCount = 0;
                 let globalStatus = '데이터 없음';
@@ -1502,7 +1607,7 @@ ${decision}
                 if (entry.logs && entry.logs.length > 1 && activePoints.length > 0) {
                     activePoints.forEach((p) => {
                        const vals = entry.logs.map(l => {
-                          const rawVal = l.values[p.originalIndex];
+                          const rawVal = (l.values && Array.isArray(l.values)) ? l.values[p.originalIndex] : null;
                           if(rawVal !== '' && rawVal != null) { const parsed = parseFloat(String(rawVal).trim().split(/[\s,\[\]]+/)[0]); if(!isNaN(parsed)) return parsed; }
                           return null;
                        }).filter(v => v !== null);
@@ -1612,13 +1717,17 @@ ${decision}
         const entry = entries.find(e => e.id === selectedId);
         if (!entry) return null;
 
-        const activePoints = entry.points.map((p, i) => ({ ...p, originalIndex: i })).filter(p => p.name.trim() !== '');
+        const activePoints = (entry.points || []).map((p, i) => ({ ...p, originalIndex: i })).filter(p => p && p.name && p.name.trim() !== '');
         const currentPoint = activePoints[activeTabIdx] || activePoints[0];
 
         const sortedLogsAsc = [...(entry.logs || [])].sort((a, b) => new Date(a.date) - new Date(b.date));
 
+        if (activePoints.length === 0 || !currentPoint) {
+            return <div className="p-10 text-center text-gray-500 font-bold bg-white rounded-xl shadow-sm animate-in fade-in">유효한 검사 항목이 없습니다. 제품 설정을 확인해주세요.</div>;
+        }
+
         let chartLogs = sortedLogsAsc.map(l => {
-           const rawVal = l.values[currentPoint.originalIndex];
+           const rawVal = (l.values && Array.isArray(l.values)) ? l.values[currentPoint.originalIndex] : null;
            let numVal = null;
            if (rawVal !== '' && rawVal != null) { const parsed = parseFloat(String(rawVal).trim().split(/[\s,\[\]]+/)[0]); if (!isNaN(parsed)) numVal = parsed; }
            return { id: l.id, date: l.date, lotNumber: l.lotNumber, content: l.content, value: numVal, rawVal: rawVal, editorName: l.editorName };
@@ -1714,8 +1823,9 @@ ${decision}
             if (i1 !== -1 && i2 !== -1) zoomedLogs = chartLogs.slice(Math.min(i1, i2), Math.max(i1, i2) + 1);
         }
 
-        let yMin = zoomedLogs.length > 0 ? Math.min(...zoomedLogs.map(l => l.value)) : 0;
-        let yMax = zoomedLogs.length > 0 ? Math.max(...zoomedLogs.map(l => l.value)) : 100;
+        const validValues = zoomedLogs.map(l => Number(l.value)).filter(v => Number.isFinite(v));
+        let yMin = validValues.length > 0 ? Math.min(...validValues) : 0;
+        let yMax = validValues.length > 0 ? Math.max(...validValues) : 100;
 
         const limitsAndSpecs = [];
         if (showLines.cl) limitsAndSpecs.push(cl);
@@ -1770,33 +1880,49 @@ ${decision}
                   </div>
                </div>
 
-               <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
+               <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
                   <div className={`p-4 rounded-xl border flex flex-col justify-center ${statusObj.bg} ${statusObj.border}`}>
-                     <p className="text-xs font-bold text-gray-600 mb-1">공정안정도 (PSI)</p>
+                     <p className="text-xs font-bold text-gray-600 mb-1 flex items-center gap-1 cursor-pointer" onClick={() => typeof handleTermClick === 'function' && handleTermClick('PSI')}><Icons.Info className="w-3 h-3"/>공정안정도 (PSI)</p>
                      <div className="flex items-end gap-2">
                         <p className={`text-2xl font-black ${statusObj.color}`}>{stabilityScore}<span className="text-sm">점</span></p>
                         <p className="text-sm mb-1">{statusObj.stars}</p>
                      </div>
                   </div>
-                  <div className="bg-gray-50 p-4 rounded-xl border border-gray-100">
-                     <p className="text-xs font-bold text-gray-500 mb-1">현재 Cpk</p>
-                     <p className={`text-xl font-black ${cpk >= 1.67 ? 'text-green-600' : cpk >= 1.33 ? 'text-blue-600' : cpk >= 1.0 ? 'text-orange-500' : 'text-red-600'}`}>{cpk > 0 ? cpk : '-'}</p>
+                  <div className="bg-gray-50 p-4 rounded-xl border border-gray-100 relative group">
+                     <p className="text-xs font-bold text-gray-500 mb-1 flex items-center gap-1 cursor-pointer" onClick={() => typeof handleTermClick === 'function' && handleTermClick('TBI')}><Icons.Info className="w-3 h-3"/>현재 Target Bias (TBI)</p>
+                     <p className={`text-xl font-black ${(() => {
+                         if (chartLogs.length === 0 || !Number.isFinite(chartLogs[chartLogs.length-1].value)) return 'text-gray-400';
+                         const tbi = calculateAsymmetricTBI(chartLogs[chartLogs.length-1].value, currentPoint);
+                         if (tbi === null) return 'text-gray-400';
+                         return Math.abs(tbi) <= 0.33 ? 'text-green-600' : Math.abs(tbi) <= 0.67 ? 'text-blue-600' : Math.abs(tbi) <= 1.0 ? 'text-orange-500' : 'text-red-600';
+                     })()}`}>{chartLogs.length > 0 && Number.isFinite(chartLogs[chartLogs.length-1].value) && calculateAsymmetricTBI(chartLogs[chartLogs.length-1].value, currentPoint) !== null ? calculateAsymmetricTBI(chartLogs[chartLogs.length-1].value, currentPoint).toFixed(2) : '-'}</p>
                   </div>
                   <div className="bg-gray-50 p-4 rounded-xl border border-gray-100">
-                     <p className="text-xs font-bold text-gray-500 mb-1">현재 Cpm</p>
-                     <p className={`text-xl font-black ${currentCpm >= 1.67 ? 'text-green-600' : currentCpm >= 1.33 ? 'text-blue-600' : currentCpm >= 1.0 ? 'text-orange-500' : 'text-red-600'}`}>{currentCpm !== null ? currentCpm : '-'}</p>
+                     <p className="text-xs font-bold text-gray-500 mb-1 flex items-center gap-1 cursor-pointer" onClick={() => typeof handleTermClick === 'function' && handleTermClick('Moving Average')}><Icons.Info className="w-3 h-3"/>최근 5 Batch Avg TBI</p>
+                     <p className={`text-xl font-black ${(() => {
+                         const recentValidTbis = chartLogs.slice(-5).filter(l => Number.isFinite(l.value)).map(l => calculateAsymmetricTBI(l.value, currentPoint)).filter(v => v !== null);
+                         if (recentValidTbis.length === 0) return 'text-gray-400';
+                         const avg = recentValidTbis.reduce((a,b)=>a+b,0) / recentValidTbis.length;
+                         return Math.abs(avg) <= 0.33 ? 'text-green-600' : Math.abs(avg) <= 0.67 ? 'text-blue-600' : Math.abs(avg) <= 1.0 ? 'text-orange-500' : 'text-gray-800';
+                     })()}`}>{(() => {
+                         const recentValidTbis = chartLogs.slice(-5).filter(l => Number.isFinite(l.value)).map(l => calculateAsymmetricTBI(l.value, currentPoint)).filter(v => v !== null);
+                         if (recentValidTbis.length === 0) return '-';
+                         const avg = recentValidTbis.reduce((a,b)=>a+b,0) / recentValidTbis.length;
+                         return avg.toFixed(2);
+                     })()}</p>
                   </div>
                   <div className="bg-gray-50 p-4 rounded-xl border border-gray-100">
-                     <p className="text-xs font-bold text-gray-500 mb-1">SPC 위반(Western)</p>
-                     <p className={`text-xl font-black ${westernRules.length > 0 ? 'text-orange-600' : 'text-gray-800'}`}>{westernRules.length}건</p>
+                     <p className="text-xs font-bold text-gray-500 mb-1 flex items-center gap-1 cursor-pointer" onClick={() => typeof handleTermClick === 'function' && handleTermClick('Sudden Jump')}><Icons.Info className="w-3 h-3"/>최근 Batch Delta</p>
+                     <p className={`text-xl font-black ${chartLogs.length >= 2 && Number.isFinite(chartLogs[chartLogs.length-1].value) && Number.isFinite(chartLogs[chartLogs.length-2].value) ? (chartLogs[chartLogs.length-1].value - chartLogs[chartLogs.length-2].value > 0 ? 'text-blue-600' : chartLogs[chartLogs.length-1].value - chartLogs[chartLogs.length-2].value < 0 ? 'text-orange-600' : 'text-gray-800') : 'text-gray-400'}`}>{chartLogs.length >= 2 && Number.isFinite(chartLogs[chartLogs.length-1].value) && Number.isFinite(chartLogs[chartLogs.length-2].value) ? (chartLogs[chartLogs.length-1].value - chartLogs[chartLogs.length-2].value > 0 ? '+' : '') + (chartLogs[chartLogs.length-1].value - chartLogs[chartLogs.length-2].value).toFixed(2) : '-'}</p>
                   </div>
                   <div className="bg-gray-50 p-4 rounded-xl border border-gray-100">
-                     <p className="text-xs font-bold text-gray-500 mb-1">이상치 (Outlier)</p>
-                     <p className={`text-xl font-black ${outlierCount > 0 ? 'text-red-600' : 'text-gray-800'}`}>{outlierCount}건</p>
-                  </div>
-                  <div className="bg-gray-50 p-4 rounded-xl border border-gray-100">
-                     <p className="text-xs font-bold text-gray-500 mb-1">분석 데이터 수</p>
-                     <p className="text-xl font-black text-gray-800">{n}건 <span className="text-xs font-normal text-gray-500">(최근: {chartLogs.length > 0 ? chartLogs[chartLogs.length-1].date : '-'})</span></p>
+                     <p className="text-xs font-bold text-gray-500 mb-1 flex items-center gap-1 cursor-pointer" onClick={() => typeof handleTermClick === 'function' && handleTermClick('Sigma')}><Icons.Info className="w-3 h-3"/>최근 5 Batch Sigma</p>
+                     <p className="text-xl font-black text-gray-800">{(() => {
+                         const recentVals = chartLogs.slice(-5).map(l => l.value).filter(v => Number.isFinite(v));
+                         if(recentVals.length < 2) return '-';
+                         const avg = recentVals.reduce((a,b)=>a+b,0)/recentVals.length;
+                         return Math.sqrt(recentVals.reduce((a,b)=>a+Math.pow(b-avg,2),0)/(recentVals.length - 1)).toFixed(3);
+                     })()}</p>
                   </div>
                </div>
             </div>
@@ -1964,31 +2090,25 @@ ${decision}
                     <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 h-[400px] print-break-inside-avoid">
                         <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-200 h-full flex flex-col relative">
                             <div className="flex justify-between items-center mb-4 shrink-0">
-                                <h3 className="font-extrabold text-lg flex items-center gap-2 text-gray-900"><Icons.Activity /> Capability Analysis</h3>
+                                <h3 className="font-extrabold text-lg flex items-center gap-2 text-gray-900 cursor-pointer" onClick={() => typeof handleTermClick === 'function' && handleTermClick('TBI')}><Icons.Activity /> Quality Condition Trend</h3>
                                 <button onClick={() => setExpandedChart({ type: 'cpk', pointIdx: activeTabIdx })} className="no-print text-xs bg-gray-100 text-gray-600 px-2 py-1.5 rounded hover:bg-gray-200"><Icons.Maximize/></button>
                             </div>
-                            <div className="flex gap-2 items-center mb-3 bg-gray-50 p-2 rounded-lg border border-gray-200 shrink-0 no-print">
-                               <span className="text-xs font-bold text-gray-600 pl-2">Window:</span>
-                               <select className="border border-gray-300 rounded outline-none text-xs px-2 py-1 focus:border-indigo-500 font-bold bg-white" value={movingWindow} onChange={e => setMovingWindow(parseInt(e.target.value))}><option value={10}>10 LOT</option><option value={20}>20 LOT</option><option value={30}>30 LOT</option><option value={50}>50 LOT</option></select>
-                               <span className="text-gray-300 mx-1">|</span>
-                               <span className="text-xs font-bold text-gray-600">보기:</span>
-                               <select className="border border-gray-300 rounded outline-none text-xs px-2 py-1 focus:border-indigo-500 font-bold bg-white" value={cpkViewMode} onChange={e => setCpkViewMode(e.target.value)}><option value="both">모두 보기</option><option value="trend">Cpk Trend 만</option><option value="moving">Moving Cpk 만</option></select>
-                            </div>
                             <div className="flex-1 min-h-0">
-                                {chartLogs.filter(l => l.mCpk !== null || l.movingCpk !== null).length > 0 ? (
+                                {chartLogs.length > 0 ? (
                                     <ResponsiveContainer width="100%" height="100%">
-                                        <LineChart data={chartLogs} margin={{top: 10, right: 10, left: -20, bottom: 5}}>
+                                        <ComposedChart data={chartLogs.map((l, i) => ({ ...l, tbi: Number.isFinite(l.value) ? calculateAsymmetricTBI(l.value, currentPoint || {}) : null, delta: i > 0 && Number.isFinite(l.value) && Number.isFinite(chartLogs[i-1].value) ? l.value - chartLogs[i-1].value : null }))} margin={{top: 10, right: 10, left: -20, bottom: 5}}>
                                             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9"/>
                                             <XAxis dataKey="date" tick={{fontSize: 11, fill: '#64748b'}} />
-                                            <YAxis domain={[0, 'auto']} tick={{fontSize: 11, fill: '#64748b'}} />
-                                            <Tooltip content={<CustomCpkTooltip />} />
+                                            <YAxis yAxisId="left" domain={[-1.5, 1.5]} tick={{fontSize: 11, fill: '#64748b'}} />
+                                            <YAxis yAxisId="right" orientation="right" tick={{fontSize: 11, fill: '#64748b'}} />
+                                            <Tooltip formatter={(val, name) => [Number(val).toFixed(2), name === 'tbi' ? 'TBI' : 'Delta']} />
                                             <Legend verticalAlign="top" height={30} wrapperStyle={{ fontSize: '11px', fontWeight: 'bold' }} />
-                                            <ReferenceLine y={1.67} label={{position: 'insideTopLeft', value: '최우수(1.67)', fill: '#16a34a', fontSize: 10, fontWeight: 'bold'}} stroke="#16a34a" strokeDasharray="3 3" />
-                                            <ReferenceLine y={1.33} label={{position: 'insideTopLeft', value: 'Target(1.33)', fill: '#22c55e', fontSize: 10, fontWeight: 'bold'}} stroke="#22c55e" strokeDasharray="3 3" />
-                                            <ReferenceLine y={1.0} label={{position: 'insideBottomLeft', value: '경고(1.0)', fill: '#f97316', fontSize: 10, fontWeight: 'bold'}} stroke="#f97316" strokeDasharray="3 3" />
-                                            {(cpkViewMode === 'both' || cpkViewMode === 'trend') && <Line type="monotone" dataKey="mCpk" stroke="#6366f1" strokeWidth={2} dot={{r:2, fill:"#6366f1"}} activeDot={{ r: 5 }} name="Cpk Trend (단기)" connectNulls isAnimationActive={false}/>}
-                                            {(cpkViewMode === 'both' || cpkViewMode === 'moving') && <Line type="monotone" dataKey="movingCpk" stroke="#ec4899" strokeWidth={3} dot={{r:3, fill:"#ec4899"}} activeDot={{ r: 6 }} name={`Moving Cpk (${movingWindow} LOT)`} connectNulls isAnimationActive={false}/>}
-                                        </LineChart>
+                                            <ReferenceLine yAxisId="left" y={1.0} label={{position: 'insideTopLeft', value: 'USL Limit (+1.0)', fill: '#991b1b', fontSize: 10, fontWeight: 'bold'}} stroke="#991b1b" strokeDasharray="3 3" />
+                                            <ReferenceLine yAxisId="left" y={0} label={{position: 'insideTopLeft', value: 'Target (0)', fill: '#16a34a', fontSize: 10, fontWeight: 'bold'}} stroke="#16a34a" strokeDasharray="3 3" />
+                                            <ReferenceLine yAxisId="left" y={-1.0} label={{position: 'insideBottomLeft', value: 'LSL Limit (-1.0)', fill: '#991b1b', fontSize: 10, fontWeight: 'bold'}} stroke="#991b1b" strokeDasharray="3 3" />
+                                            <Bar yAxisId="right" dataKey="delta" fill="#94a3b8" name="Batch Delta" />
+                                            <Line yAxisId="left" type="monotone" dataKey="tbi" stroke="#6366f1" strokeWidth={2} dot={{r:3, fill:"#6366f1"}} activeDot={{ r: 5 }} name="Target Bias Index" connectNulls isAnimationActive={false}/>
+                                        </ComposedChart>
                                     </ResponsiveContainer>
                                 ) : (
                                     <div className="flex items-center justify-center h-full text-sm text-gray-400 bg-gray-50 rounded-xl border border-dashed border-gray-200">데이터가 부족합니다.</div>
@@ -1998,23 +2118,22 @@ ${decision}
 
                         <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-200 h-full flex flex-col relative">
                             <div className="flex justify-between items-center mb-2 shrink-0">
-                                <h3 className="font-extrabold text-lg flex items-center gap-2 text-gray-900"><Icons.NormalCurve /> 공정 분포도 (Distribution)</h3>
+                                <h3 className="font-extrabold text-lg flex items-center gap-2 text-gray-900"><Icons.NormalCurve /> Batch 실측 분포 (Distribution)</h3>
                                 <button onClick={() => setExpandedChart({ type: 'area', pointIdx: activeTabIdx })} className="no-print text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded hover:bg-gray-200"><Icons.Maximize/></button>
                             </div>
                             <div className="flex-1 min-h-0 mt-2">
                               {n > 1 ? (
                                 <ResponsiveContainer width="100%" height="100%">
-                                  <AreaChart data={generateNormalDistData(stats, currentPoint && currentPoint.lsl, currentPoint && currentPoint.target, currentPoint && currentPoint.usl)}>
+                                  <ScatterChart margin={{top: 10, right: 10, left: -20, bottom: 5}}>
                                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9"/>
-                                    <XAxis dataKey="x" type="number" domain={['dataMin', 'dataMax']} tick={{fontSize: 11, fill: '#64748b'}} tickFormatter={(val) => val.toFixed(2)} />
-                                    <YAxis hide={true} />
-                                    <Tooltip labelFormatter={(val) => `측정값: ${Number(val).toFixed(2)}`} formatter={(val) => [Number(val).toFixed(4), '확률밀도']} />
-                                    {currentPoint && currentPoint.usl && <ReferenceLine x={parseFloat(currentPoint.usl)} label={{position: 'insideTopLeft', value: `USL: ${currentPoint.usl}`, fill: '#991b1b', fontSize: 11, fontWeight: 'bold'}} stroke="#991b1b" strokeDasharray="3 3" />}
-                                    {currentPoint && currentPoint.lsl && <ReferenceLine x={parseFloat(currentPoint.lsl)} label={{position: 'insideTopRight', value: `LSL: ${currentPoint.lsl}`, fill: '#991b1b', fontSize: 11, fontWeight: 'bold'}} stroke="#991b1b" strokeDasharray="3 3" />}
-                                    {currentPoint && currentPoint.target && <ReferenceLine x={parseFloat(currentPoint.target)} label={{position: 'insideTopLeft', value: `Target: ${currentPoint.target}`, fill: '#16a34a', fontSize: 11, fontWeight: 'bold'}} stroke="#16a34a" strokeDasharray="5 5" />}
-                                    <ReferenceLine x={stats.mean} label={{position: 'insideBottomRight', value: `CL: ${stats.mean.toFixed(2)}`, fill: '#1e293b', fontSize: 11, fontWeight: 'bold'}} stroke="#1e293b" strokeDasharray="3 3" />
-                                    <Area type="monotone" dataKey="y" stroke="#6366f1" fill="#818cf8" fillOpacity={0.4} name="확률밀도" isAnimationActive={false}/>
-                                  </AreaChart>
+                                    <XAxis type="category" dataKey="date" name="Date" tick={{fontSize: 11, fill: '#64748b'}} />
+                                    <YAxis type="number" dataKey="value" name="Value" domain={['auto', 'auto']} tick={{fontSize: 11, fill: '#64748b'}} />
+                                    <Tooltip cursor={{strokeDasharray: '3 3'}} />
+                                    {currentPoint && currentPoint.usl && <ReferenceLine y={parseFloat(currentPoint.usl)} label={{position: 'insideTopLeft', value: `USL: ${currentPoint.usl}`, fill: '#991b1b', fontSize: 11, fontWeight: 'bold'}} stroke="#991b1b" strokeDasharray="3 3" />}
+                                    {currentPoint && currentPoint.lsl && <ReferenceLine y={parseFloat(currentPoint.lsl)} label={{position: 'insideBottomLeft', value: `LSL: ${currentPoint.lsl}`, fill: '#991b1b', fontSize: 11, fontWeight: 'bold'}} stroke="#991b1b" strokeDasharray="3 3" />}
+                                    {currentPoint && currentPoint.target && <ReferenceLine y={parseFloat(currentPoint.target)} label={{position: 'insideTopLeft', value: `Target: ${currentPoint.target}`, fill: '#16a34a', fontSize: 11, fontWeight: 'bold'}} stroke="#16a34a" strokeDasharray="5 5" />}
+                                    <Scatter name="측정값" data={chartLogs} fill="#8b5cf6" />
+                                  </ScatterChart>
                                 </ResponsiveContainer>
                               ) : (
                                 <div className="flex items-center justify-center h-full text-sm text-gray-400 bg-gray-50 rounded-xl border border-dashed border-gray-200">데이터가 2개 이상 필요합니다.</div>
@@ -2273,6 +2392,43 @@ ${decision}
                       {options.map((opt, i) => <option key={i} value={opt.value}>{opt.label}</option>)}
                     </select>
                   </div>
+                  <div className="bg-orange-50 p-3 rounded-lg border border-orange-200 col-span-1 md:col-span-2 mt-2">
+                    <label className="block text-sm font-bold text-orange-800 mb-1">엑셀 필터링 (선택사항)</label>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-bold text-orange-700 mb-1">수지명/제품명 매핑</label>
+                        <select className="w-full border p-2 rounded outline-none bg-white font-medium text-sm" value={excelState.selectedResinCol || ''} onChange={e => setExcelState({...excelState, selectedResinCol: e.target.value, selectedResinVal: ''})}>
+                          <option value="">-- 컬럼 선택 안함 --</option>
+                          {options.map((opt, i) => <option key={i} value={opt.value}>{opt.label}</option>)}
+                        </select>
+                      </div>
+                      {excelState.selectedResinCol && (
+                      <div>
+                        <label className="block text-xs font-bold text-orange-700 mb-1">필터링할 수지명 선택</label>
+                        <select className="w-full border p-2 rounded outline-none bg-white font-medium text-sm" value={excelState.selectedResinVal || ''} onChange={e => setExcelState({...excelState, selectedResinVal: e.target.value})}>
+                          <option value="">-- 가져올 수지명 선택 --</option>
+                          {Array.from(new Set(excelState.data.map(r => String(r[excelState.selectedResinCol] || '').trim()).filter(Boolean))).map((val, i) => (
+                             <option key={i} value={val}>{val}</option>
+                          ))}
+                        </select>
+                      </div>
+                      )}
+                    </div>
+                    <div className="mt-3">
+                        <label className="block text-xs font-bold text-orange-700 mb-1">가져올 항목 선택 (매핑된 컬럼만 적용됨)</label>
+                        <div className="flex flex-wrap gap-2">
+                           {activePoints.map(p => (
+                               <label key={p.originalIndex} className="flex items-center gap-1 bg-white px-2 py-1 border border-orange-200 rounded cursor-pointer hover:bg-orange-100 transition-colors">
+                                   <input type="checkbox" checked={excelState.selectedPoints.includes(p.originalIndex)} onChange={(e) => {
+                                       const up = e.target.checked ? [...excelState.selectedPoints, p.originalIndex] : excelState.selectedPoints.filter(idx => idx !== p.originalIndex);
+                                       setExcelState({...excelState, selectedPoints: up});
+                                   }} />
+                                   <span className="text-sm font-bold text-orange-800">{p.name}</span>
+                               </label>
+                           ))}
+                        </div>
+                    </div>
+                  </div>
                   <div className="bg-indigo-50 p-3 rounded-lg border border-indigo-200 col-span-1 md:col-span-2 mt-2">
                     <label className="block text-sm font-bold text-indigo-800 mb-1">이어서 추가 시, 데이터 중복 확인 기준</label>
                     <select className="w-full border p-2 rounded outline-none bg-white text-sm font-medium" value={excelState.duplicateCriteria} onChange={e => setExcelState({...excelState, duplicateCriteria: e.target.value})}>
@@ -2292,6 +2448,131 @@ ${decision}
               </div>
             </div>
           </div>
+        );
+      };
+
+      const renderTermsModal = () => {
+        if (!termsModalState.isOpen) return null;
+
+        const visibleTerms = qualityAppTerms.filter(t => termsModalState.editMode || t.isVisible).sort((a, b) => a.order - b.order);
+
+        const saveTerm = () => {
+            const up = qualityAppTerms.map(t => t.name === termsModalState.editingTerm.name ? termsModalState.editingTerm : t);
+            setQualityAppTerms(up);
+            localStorage.setItem('qualityAppTerms', JSON.stringify(up));
+            setTermsModalState({ ...termsModalState, editMode: false, editingTerm: null });
+            showToast('용어 설명이 저장되었습니다.');
+        };
+
+        const restoreDefaultTerms = () => {
+            if (confirm('모든 용어 설명을 기본값으로 복원하시겠습니까?')) {
+                setQualityAppTerms(defaultTerms);
+                localStorage.setItem('qualityAppTerms', JSON.stringify(defaultTerms));
+                setTermsModalState({ ...termsModalState, editMode: false, editingTerm: null });
+                showToast('기본값으로 복원되었습니다.');
+            }
+        };
+
+        return (
+            <div className="fixed inset-0 bg-gray-900/60 z-[160] flex items-center justify-center p-4 backdrop-blur-sm">
+                <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95">
+                    <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50 shrink-0">
+                        <h3 className="font-extrabold text-lg text-gray-800 flex items-center gap-2"><Icons.Info className="text-indigo-600"/> 품질관리 용어 가이드</h3>
+                        <div className="flex items-center gap-2">
+                           {!termsModalState.editMode && <button onClick={() => setTermsModalState({...termsModalState, editMode: true})} className="text-xs bg-indigo-50 text-indigo-700 px-3 py-1.5 rounded-lg hover:bg-indigo-100 font-bold border border-indigo-200">편집 모드</button>}
+                           {termsModalState.editMode && !termsModalState.editingTerm && <button onClick={() => setTermsModalState({...termsModalState, editMode: false})} className="text-xs bg-gray-100 text-gray-700 px-3 py-1.5 rounded-lg hover:bg-gray-200 font-bold border">편집 종료</button>}
+                           <button onClick={() => setTermsModalState({ isOpen: false, editMode: false, editingTerm: null, highlightedTermName: null })} className="text-gray-400 hover:text-gray-600"><Icons.X/></button>
+                        </div>
+                    </div>
+
+                    <div className="flex-1 overflow-y-auto p-6 bg-gray-50/50">
+                        {termsModalState.editMode && termsModalState.editingTerm ? (
+                            <div className="bg-white p-6 rounded-xl border border-indigo-100 shadow-sm space-y-4">
+                                <div>
+                                    <label className="text-xs font-bold text-gray-500 mb-1 block">용어명</label>
+                                    <input type="text" className="w-full border border-gray-300 rounded p-2 text-sm bg-gray-100 font-bold text-gray-700" value={termsModalState.editingTerm.name} disabled />
+                                </div>
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="text-xs font-bold text-gray-500 mb-1 block">분류</label>
+                                        <input type="text" className="w-full border border-gray-300 rounded p-2 text-sm outline-none focus:border-indigo-500" value={termsModalState.editingTerm.category} onChange={e => setTermsModalState({ ...termsModalState, editingTerm: { ...termsModalState.editingTerm, category: e.target.value }})} />
+                                    </div>
+                                    <div>
+                                        <label className="text-xs font-bold text-gray-500 mb-1 block">순서 (숫자)</label>
+                                        <input type="number" className="w-full border border-gray-300 rounded p-2 text-sm outline-none focus:border-indigo-500" value={termsModalState.editingTerm.order} onChange={e => setTermsModalState({ ...termsModalState, editingTerm: { ...termsModalState.editingTerm, order: Number(e.target.value) }})} />
+                                    </div>
+                                </div>
+                                <div>
+                                    <label className="text-xs font-bold text-gray-500 mb-1 block">원론적 정의</label>
+                                    <textarea className="w-full border border-gray-300 rounded p-2 text-sm outline-none focus:border-indigo-500 h-20" value={termsModalState.editingTerm.definition} onChange={e => setTermsModalState({ ...termsModalState, editingTerm: { ...termsModalState.editingTerm, definition: e.target.value }})} />
+                                </div>
+                                <div>
+                                    <label className="text-xs font-bold text-gray-500 mb-1 block">합성수지 Batch 생산에서의 의미</label>
+                                    <textarea className="w-full border border-gray-300 rounded p-2 text-sm outline-none focus:border-indigo-500 h-20" value={termsModalState.editingTerm.resinApp} onChange={e => setTermsModalState({ ...termsModalState, editingTerm: { ...termsModalState.editingTerm, resinApp: e.target.value }})} />
+                                </div>
+                                <div>
+                                    <label className="text-xs font-bold text-gray-500 mb-1 block">현재 프로그램에서의 사용</label>
+                                    <textarea className="w-full border border-gray-300 rounded p-2 text-sm outline-none focus:border-indigo-500 h-20" value={termsModalState.editingTerm.systemUsage} onChange={e => setTermsModalState({ ...termsModalState, editingTerm: { ...termsModalState.editingTerm, systemUsage: e.target.value }})} />
+                                </div>
+                                <div>
+                                    <label className="text-xs font-bold text-gray-500 mb-1 block">해석 방법 / 주의사항</label>
+                                    <textarea className="w-full border border-gray-300 rounded p-2 text-sm outline-none focus:border-indigo-500 h-20" value={termsModalState.editingTerm.interpretation} onChange={e => setTermsModalState({ ...termsModalState, editingTerm: { ...termsModalState.editingTerm, interpretation: e.target.value }})} />
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <input type="checkbox" id="term_visible" checked={termsModalState.editingTerm.isVisible} onChange={e => setTermsModalState({ ...termsModalState, editingTerm: { ...termsModalState.editingTerm, isVisible: e.target.checked }})} />
+                                    <label htmlFor="term_visible" className="text-sm font-bold text-gray-700 cursor-pointer">가이드 목록에 표시</label>
+                                </div>
+                                <div className="flex justify-end gap-2 pt-4 border-t border-gray-100">
+                                    <button onClick={() => setTermsModalState({ ...termsModalState, editingTerm: null })} className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg font-bold hover:bg-gray-200">취소</button>
+                                    <button onClick={saveTerm} className="px-4 py-2 bg-indigo-600 text-white rounded-lg font-bold hover:bg-indigo-700">저장</button>
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="space-y-6">
+                                {termsModalState.editMode && (
+                                    <div className="flex justify-end mb-4">
+                                        <button onClick={restoreDefaultTerms} className="text-xs text-red-600 border border-red-200 bg-red-50 px-3 py-1.5 rounded hover:bg-red-100 font-bold">기본값(초기화) 복원</button>
+                                    </div>
+                                )}
+                                {Array.from(new Set(visibleTerms.map(t => t.category))).map(cat => (
+                                    <div key={cat} className="mb-8">
+                                        <h4 className="font-black text-lg text-indigo-900 border-b-2 border-indigo-100 pb-2 mb-4 pl-2 border-l-4 border-l-indigo-500">{cat}</h4>
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                            {visibleTerms.filter(t => t.category === cat).map(t => (
+                                                <div key={t.name} id={`term_${t.name.replace(/\s+/g, '')}`} className={`bg-white p-4 rounded-xl shadow-sm border transition-all ${termsModalState.highlightedTermName === t.name ? 'border-indigo-400 ring-2 ring-indigo-100 scale-[1.02]' : 'border-gray-200 hover:border-indigo-200'}`}>
+                                                    <div className="flex justify-between items-start mb-2">
+                                                        <h5 className="font-extrabold text-gray-800 text-base">{t.name} {!t.isVisible && <span className="text-[10px] bg-gray-200 text-gray-500 px-1.5 py-0.5 rounded ml-2">숨김</span>}</h5>
+                                                        {termsModalState.editMode && (
+                                                            <button onClick={() => setTermsModalState({...termsModalState, editingTerm: t})} className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded hover:bg-gray-200 flex items-center gap-1 font-bold border border-gray-200"><Icons.Edit2 className="w-3 h-3"/> 수정</button>
+                                                        )}
+                                                    </div>
+                                                    <div className="space-y-3 mt-3 text-sm">
+                                                        <div>
+                                                            <span className="text-xs font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded mr-2">정의</span>
+                                                            <span className="text-gray-700">{t.definition}</span>
+                                                        </div>
+                                                        <div className="pl-2 border-l-2 border-gray-200">
+                                                            <span className="text-[11px] font-bold text-gray-500 block mb-0.5">Batch 생산 의미</span>
+                                                            <span className="text-gray-600 text-xs">{t.resinApp}</span>
+                                                        </div>
+                                                        <div className="pl-2 border-l-2 border-gray-200">
+                                                            <span className="text-[11px] font-bold text-gray-500 block mb-0.5">시스템 사용</span>
+                                                            <span className="text-gray-600 text-xs">{t.systemUsage}</span>
+                                                        </div>
+                                                        <div className="bg-gray-50 p-2 rounded text-xs text-gray-700 border border-gray-100">
+                                                            <span className="font-bold text-gray-600">해석:</span> {t.interpretation}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                </div>
+            </div>
         );
       };
 
@@ -2336,6 +2617,69 @@ ${decision}
                            updateAndSync(updatedEntries); setIsAddPointModalOpen(false); setNewPointForm({ name: '', lsl: '', target: '', usl: '' }); showToast("포인트 추가됨");
                        }} className="flex-1 py-2.5 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700">추가하기</button>
                    </div>
+               </div>
+            </div>
+         );
+      };
+
+      const renderChartGuide = (type) => {
+         const guides = {
+            line: {
+               title: 'SPC 관리도 해석 가이드',
+               desc: '시간에 따른 공정 변동을 시각적으로 모니터링하여 평소 공정 상태(안정/불안정)를 판단합니다.',
+               components: [
+                  { term: 'Target', text: '공정의 이상적인 중심 목표값입니다.' },
+                  { term: 'USL / LSL', text: '고객이나 사내에서 정한 절대적인 품질 규격 한계선입니다.' },
+                  { term: 'UCL / LCL', text: '과거 데이터를 바탕으로 계산된 평소 공정 변동 범위(통계적 한계선)입니다.' },
+                  { term: 'CL', text: '측정된 전체 데이터의 실제 중심(평균)입니다.' },
+                  { term: 'Moving Average', text: '최근 5 Batch 등의 단기 추세를 나타냅니다.' },
+                  { term: 'Western Rule', text: '평소와 다른 이상 패턴(8연속 상승/하락 등)을 감지합니다.' }
+               ],
+               action: '이탈 발생 시 반응 조건, 원료 특성, 계측기 상태 등 공정 이상 유무를 점검해야 합니다.'
+            },
+            cpk: {
+               title: 'Quality Condition Trend 해석 가이드',
+               desc: '각 Batch의 Target 편차(TBI)와 이전 Batch 대비 변화량(Delta)을 종합적으로 분석합니다.',
+               components: [
+                  { term: 'TBI', text: 'Target Bias Index. 값이 +1이면 USL 한계, -1이면 LSL 한계를 의미합니다.' },
+                  { term: 'Batch Delta', text: '이전 Batch 대비 현재 Batch의 변화량(막대 그래프)입니다.' },
+                  { term: 'Moving Average', text: '최근 5 Batch TBI 평균을 통해 단기 추세를 확인합니다.' }
+               ],
+               action: 'Delta가 크거나(Sudden Jump), TBI가 계속 한 방향으로 커지면(Drift) 사전 조치가 필요합니다.'
+            },
+            area: {
+               title: 'Batch 실측 분포 (Scatter) 해석 가이드',
+               desc: '전체 Batch 측정값들이 규격과 Target 사이에서 어떻게 분포되어 있는지 확인합니다.',
+               components: [
+                  { term: 'Target', text: '점들이 모여 있어야 할 이상적인 중심선입니다.' },
+                  { term: 'USL / LSL', text: '절대적인 규격 한계선입니다.' },
+                  { term: 'Sigma', text: '점들이 흩어진 정도(산포)를 나타냅니다.' }
+               ],
+               action: '점들이 널리 퍼져 있다면(산포 증가) Batch 간 품질 균일성이 떨어진 상태입니다.'
+            }
+         };
+
+         const guide = guides[type === 'multi' ? 'line' : type];
+         if (!guide) return null;
+
+         return (
+            <div className="bg-blue-50/50 p-4 rounded-xl border border-blue-100 mt-4 animate-in fade-in slide-in-from-bottom-2">
+               <div className="flex items-center gap-2 mb-2 pb-2 border-b border-blue-100/50">
+                  <Icons.Info className="text-blue-500 w-4 h-4"/>
+                  <h4 className="font-extrabold text-blue-900 text-sm">{guide.title}</h4>
+               </div>
+               <p className="text-xs text-blue-800 mb-3 leading-relaxed">{guide.desc}</p>
+               <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mb-3">
+                  {guide.components.map((c, i) => (
+                     <div key={i} className="flex gap-2 items-start text-xs bg-white/60 p-2 rounded border border-blue-50/50">
+                        <span className="font-black text-indigo-700 whitespace-nowrap cursor-pointer hover:underline hover:text-indigo-900" onClick={() => typeof handleTermClick === 'function' && handleTermClick(c.term.split(' / ')[0])}>{c.term}</span>
+                        <span className="text-gray-600 leading-tight">{c.text}</span>
+                     </div>
+                  ))}
+               </div>
+               <div className="text-[11px] font-bold text-orange-700 bg-orange-50 p-2 rounded flex items-start gap-1.5 border border-orange-100/50">
+                  <Icons.AlertCircle className="w-3 h-3 shrink-0 mt-0.5"/>
+                  <span className="leading-tight">{guide.action}</span>
                </div>
             </div>
          );
@@ -2437,8 +2781,9 @@ ${decision}
             if (i1 !== -1 && i2 !== -1) zoomedLogs = chartLogs.slice(Math.min(i1, i2), Math.max(i1, i2) + 1);
         }
 
-        let yMin = zoomedLogs.length > 0 ? Math.min(...zoomedLogs.map(l => l.value)) : 0;
-        let yMax = zoomedLogs.length > 0 ? Math.max(...zoomedLogs.map(l => l.value)) : 100;
+        const validValues = zoomedLogs.map(l => Number(l.value)).filter(v => Number.isFinite(v));
+        let yMin = validValues.length > 0 ? Math.min(...validValues) : 0;
+        let yMax = validValues.length > 0 ? Math.max(...validValues) : 100;
 
         const limitsAndSpecs = [];
         if (showLines.cl) limitsAndSpecs.push(cl);
@@ -2591,6 +2936,7 @@ ${decision}
                   </Fragment>
                 )}
               </div>
+              {renderChartGuide(expandedChart.type)}
             </div>
           </div>
         );
