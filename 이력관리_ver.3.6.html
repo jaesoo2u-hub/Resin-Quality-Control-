@@ -998,10 +998,19 @@ const [entries, setEntries] = useState([]);
       };
 
       const handleImportExcelData = (importMode) => {
-        const { data, mapping, duplicateCriteria } = excelState;
+        const { data, mapping, duplicateCriteria, selectedResin } = excelState;
         if (!mapping.date) { showToast("측정일(Date) 매핑은 필수입니다."); return; }
         const entry = entries.find(en => en.id === selectedId);
         const activePoints = entry.points.map((p, i) => ({ ...p, originalIndex: i })).filter(p => p.name.trim() !== '');
+
+        let filteredData = data;
+        if (selectedResin) {
+            filteredData = data.filter(r => {
+                const rVal = r['수지명'] || r['제품명'] || r['제품'] || r['Grade'] || r['Resin'] || r['Product'] || r['Product Name'] || r['Resin Name'];
+                return rVal && rVal.toString().trim() === selectedResin;
+            });
+        }
+
         const parsedLogs = [];
 
         filteredData.forEach((row, index) => {
@@ -2534,7 +2543,12 @@ const renderDetails = () => {
               </div>
               <div className="p-6 space-y-6">
                 <div className="text-sm text-gray-600 bg-indigo-50 p-4 rounded-lg border border-indigo-100">
-                  <p>업로드한 엑셀 파일에서 <b>총 {excelState.data.length}건</b>의 행이 발견되었습니다.</p>
+                  <p>업로드한 엑셀 파일에서 <b>총 {excelState.data.length}건</b>의 행이 발견되었습니다.
+                  {excelState.selectedResin && <span>(선택된 수지 '{excelState.selectedResin}' 필터 적용 후: <b>{excelState.data.filter(r => {
+                      const rVal = r['수지명'] || r['제품명'] || r['제품'] || r['Grade'] || r['Resin'] || r['Product'] || r['Product Name'] || r['Resin Name'];
+                      return rVal && rVal.toString().trim() === excelState.selectedResin;
+                  }).length}건</b>)</span>}
+                  </p>
                   <p className="mt-1">시스템의 각 입력 필드와 엑셀의 헤더(열 이름)를 알맞게 짝지어주세요.</p>
                 </div>
                 <div className="grid grid-cols-2 gap-x-6 gap-y-4">
