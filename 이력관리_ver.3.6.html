@@ -1,4 +1,4 @@
-{renderGuide('dist')}{renderGuide('cap')}
+
               <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 mt-6">
                 <div className="flex justify-between items-center mb-4">
                     <h3 className="font-bold text-lg text-indigo-700 flex items-center gap-2"><Icons.History/> Audit Log (감사 로그)</h3>
@@ -1168,6 +1168,7 @@ const [entries, setEntries] = useState([]);
         const writable = await handle.createWritable();
         await writable.write(contentStr); await writable.close();
       };
+
 
 
       const startEditing = async () => {
@@ -2832,6 +2833,7 @@ const renderDetails = () => {
                         </LineChart>
                       </ResponsiveContainer>
                     </div>
+                    {renderGuide('dist')}
                   </div>
                 )}
                 {expandedChart.type === 'cpk' && (
