@@ -1,8 +1,70 @@
-<!DOCTYPE html>
-<html lang="ko">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+{renderGuide('dist')}{renderGuide('cap')}
+              <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 mt-6">
+                <div className="flex justify-between items-center mb-4">
+                    <h3 className="font-bold text-lg text-indigo-700 flex items-center gap-2"><Icons.History/> Audit Log (감사 로그)</h3>
+                    <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded">총 {auditLogs.length}건 기록</span>
+                </div>
+                <div className="max-h-60 overflow-y-auto border border-gray-200 rounded-lg bg-gray-50 p-2">
+                  {auditLogs.length === 0 ? (
+                    <div className="text-center text-sm text-gray-500 py-10">기록된 작업이 없습니다.</div>
+                  ) : (
+                    <div className="space-y-2">
+                      {auditLogs.map((log) => (
+                        <div key={log.id} className="bg-white p-3 rounded shadow-sm border border-gray-100 text-xs">
+                          <div className="flex justify-between items-center mb-1 border-b pb-1">
+                            <span className="font-bold text-indigo-600">{log.action}</span>
+                            <span className="text-gray-400">{new Date(log.timestamp).toLocaleString()}</span>
+                          </div>
+                          <div className="grid grid-cols-2 gap-2 text-gray-600">
+                            <div><span className="font-bold">User:</span> {log.userName}</div>
+                            <div className="truncate"><span className="font-bold">Client:</span> {log.clientId}</div>
+                            {log.productName && <div><span className="font-bold">제품:</span> {log.productName}</div>}
+                            {log.lotNumber && <div><span className="font-bold">LOT:</span> {log.lotNumber}</div>}
+                          </div>
+                          {log.beforeData && (
+                            <div className="mt-2 p-1.5 bg-red-50 rounded text-red-700 max-h-16 overflow-y-auto whitespace-pre-wrap">
+                              <span className="font-bold">변경 전:</span> {JSON.stringify(log.beforeData)}
+                            </div>
+                          )}
+                          {log.afterData && (
+                            <div className="mt-1 p-1.5 bg-blue-50 rounded text-blue-700 max-h-16 overflow-y-auto whitespace-pre-wrap">
+                              <span className="font-bold">변경 후:</span> {JSON.stringify(log.afterData)}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 mt-6">
+                <h3 className="font-bold text-lg mb-4 text-indigo-700 flex items-center gap-2"><span className="material-symbols-outlined">book</span> 품질관리 용어 가이드 편집</h3>
+                <div className="space-y-3 max-h-64 overflow-y-auto border border-gray-200 rounded-lg p-3 bg-gray-50">
+                  {qualityAppTerms.sort((a,b)=>a.order-b.order).map((term, i) => (
+                    <div key={term.name} className="bg-white p-3 rounded shadow-sm border border-gray-100">
+                      <div className="flex justify-between items-center mb-2">
+                        <div className="font-bold text-indigo-800">{term.name} <span className="text-xs font-normal text-gray-500 bg-gray-100 px-1 rounded ml-1">{term.category}</span></div>
+                        <div className="flex items-center gap-2">
+                           <label className="text-xs flex items-center gap-1 cursor-pointer">
+                             <input type="checkbox" checked={term.isVisible} onChange={(e) => {
+                               const newTerms = [...qualityAppTerms]; newTerms[i].isVisible = e.target.checked; setQualityAppTerms(newTerms);
+                             }} className="accent-indigo-600" /> 표시
+                           </label>
+                           <input type="number" className="w-12 border p-1 text-xs rounded" value={term.order} onChange={(e) => {
+                               const newTerms = [...qualityAppTerms]; newTerms[i].order = parseInt(e.target.value) || 0; setQualityAppTerms(newTerms);
+                           }} title="정렬 순서" />
+                        </div>
+                      </div>
+                      <textarea className="w-full text-xs border p-2 rounded h-20 outline-none focus:ring-1 focus:ring-indigo-500" value={term.definition} onChange={(e) => {
+                          const newTerms = [...qualityAppTerms]; newTerms[i].definition = e.target.value; setQualityAppTerms(newTerms);
+                      }} />
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+<h3 className="font-bold text-lg mb-4 text-indigo-700 flex items-center gap-2"><Icons.Database/> 데이터 백업 및 복원</h3>ce-width, initial-scale=1.0">
   <title>합성수지 품질 이력 관리 (V3 + 사진 첨부)</title>
 
   <script src="https://cdn.tailwindcss.com"></script>
@@ -737,7 +799,78 @@ ${decision}
       const [newPointForm, setNewPointForm] = useState({ name: '', lsl: '', target: '', usl: '' });
       const [newProfileForm, setNewProfileForm] = useState({ name: '', profile: 'Target 중심 관리형', warningMargin: 15, criticalMargin: 5 });
 
-      const [entries, setEntries] = useState([]);
+
+      const [auditLogs, setAuditLogs] = useState([]);
+      const [clientId] = useState(() => {
+        let id = localStorage.getItem('qualityAppClientId');
+        if (!id) {
+            id = crypto.randomUUID ? crypto.randomUUID() : 'client-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+            localStorage.setItem('qualityAppClientId', id);
+        }
+        return id;
+      });
+      const [qualityAppTerms, setQualityAppTerms] = useState(() => {
+        const saved = localStorage.getItem('qualityAppTerms');
+        return saved ? JSON.parse(saved) : [
+            { name: 'Cpk', category: '통계 지표', definition: '원론적 정의:\n공정 평균이 규격 중심에서 얼마나 치우쳐 있는지와 공정의 산포를 함께 고려하여, 공정이 규격 범위 안에서 어느 정도의 능력을 가지는지를 나타내는 공정능력지수입니다.\n\n합성수지 Batch 생산에서의 의미:\n동일 수지의 Batch 결과가 설정된 규격 범위 안에서 얼마나 안정적으로 생산되고 있는지를 참고하는 지표입니다. 제품별 Spec Width와 데이터 특성에 따라 해석이 달라질 수 있습니다.\n\n현재 프로그램에서의 사용:\n현재 프로그램에서는 통계 참고지표로 사용하며, Smart Analysis의 핵심 패턴 판정은 Cpk 하나에 의존하지 않습니다.\n\n해석 방법:\n일반적으로 값이 높을수록 규격 대비 공정능력이 양호합니다. 그러나 당사의 다품종 Batch 생산에서는 Target 편차, 최근 Batch 변화, 데이터 수 등을 함께 확인해야 합니다.', isVisible: true, order: 1 },
+            { name: 'Cpm', category: '통계 지표', definition: '원론적 정의:\n규격 한계뿐 아니라 공정 평균이 목표값(Target)에서 얼마나 벗어났는지도 함께 고려하는 공정능력지수입니다.\n\n합성수지 Batch 생산에서의 의미:\n규격 안에는 들어오지만 점도나 고형분 등이 목표값에서 지속적으로 벗어나는 상황을 확인하는 데 의미가 있습니다.\n\n현재 프로그램에서의 사용:\n현재 프로그램에서는 Target 관련 보조 통계지표로 활용하며, Smart Analysis의 핵심 패턴 판정은 TBI와 Batch 변화 등을 중심으로 수행합니다.\n\n해석 방법:\n공정 산포뿐 아니라 Target에서의 평균 이격이 커질수록 Cpm이 낮아질 수 있습니다.', isVisible: true, order: 2 },
+            { name: 'Sigma', category: '통계 지표', definition: '원론적 정의:\n데이터의 산포 정도를 나타내는 통계적 지표로, 측정값이 평균을 중심으로 얼마나 퍼져 있는지를 나타냅니다.\n\n합성수지 Batch 생산에서의 의미:\n동일 수지를 반복 생산할 때 점도, 고형분, 산가 등의 Batch 결과가 얼마나 들쭉날쭉한지를 파악하는 데 활용합니다.\n\n현재 프로그램에서의 사용:\n최근 Batch의 산포와 전체 데이터의 변동성을 파악하는 참고지표로 활용합니다.\n\n해석 방법:\nSigma가 커질수록 일반적으로 Batch 간 변동성이 커진 것으로 볼 수 있으므로 Target과 규격 위치를 함께 확인해야 합니다.', isVisible: true, order: 3 },
+            { name: 'UCL / LCL', category: '통계 지표', definition: '원론적 정의:\n관리도의 상한 관리한계(UCL)와 하한 관리한계(LCL)로, 통계적으로 정상적인 공정 변동 범위를 판단하기 위한 기준선입니다.\n\n합성수지 Batch 생산에서의 의미:\n고객 또는 사내 규격인 USL/LSL과는 별개로, 해당 데이터에서 평소 공정이 어느 정도 범위로 변동하는지를 판단하는 기준입니다.\n\n현재 프로그램에서의 사용:\nSPC 관리도에서 통계적 관리한계로 표시되며, 평소 변동과 다른 신호를 확인하는 데 활용합니다.\n\n해석 방법:\nUCL/LCL을 벗어나면 평소 공정 변동과 다른 신호일 가능성이 있으므로 원료, 반응조건, 설비, 측정 및 샘플링 상태 등을 함께 확인합니다.', isVisible: true, order: 4 },
+            { name: 'Western Rule', category: '통계 지표', definition: '원론적 정의:\n관리도에서 평균으로부터의 이탈이나 연속적인 증가·감소 등 비정상적인 패턴을 탐지하기 위한 통계적 규칙입니다.\n\n합성수지 Batch 생산에서의 의미:\n규격 이탈 전에 나타날 수 있는 비정상적인 데이터 패턴을 확인하는 데 참고할 수 있지만, 당사의 비연속적인 다품종 Batch 생산에서는 생산 간격과 제품 특성을 고려하여 신중하게 해석해야 합니다.\n\n현재 프로그램에서의 사용:\n현재 프로그램에서는 여러 Western Electric Rule 패턴을 참고지표로 계산합니다.\n\n해석 방법:\n규칙 발생 자체가 불량이나 특정 원인을 의미하는 것은 아니며, 평소와 다른 패턴이 발생했는지 확인하고 원인 조사를 보조하는 용도로 활용합니다.', isVisible: true, order: 5 },
+            { name: 'Moving Average', category: '통계 지표', definition: '원론적 정의:\n최근 일정 개수의 데이터를 평균하여 단기적인 흐름을 부드럽게 보는 방법입니다.\n\n합성수지 Batch 생산에서의 의미:\n최근 3~5 Batch 등의 평균 변화를 통해 일시적인 한 점보다 최근 공정 방향을 파악하는 데 활용합니다.\n\n현재 프로그램에서의 사용:\n최근 Batch 흐름 분석에 활용합니다.\n\n해석 방법:\n단기 추세를 보는 데 도움이 되지만 데이터가 적을 경우 과도한 해석을 피합니다.', isVisible: true, order: 6 },
+            { name: 'Spec-Out', category: '상태 지표', definition: '원론적 정의:\n측정값이 규격 상한 또는 하한을 벗어난 상태입니다.\n\n합성수지 Batch 생산에서의 의미:\n해당 Batch가 제품의 설정 품질 규격을 벗어난 상태이며 QA 확인이 필요한 직접적인 이상 신호입니다.\n\n현재 프로그램에서의 사용:\nSmart Analysis의 최우선 상태 판정으로 사용합니다.\n\n해석 방법:\nSpec-Out 자체는 확인이 필요한 상태이며 최종 조치 여부는 QA 판단에 따릅니다.', isVisible: true, order: 7 },
+            { name: 'PSI', category: '내부 지표', definition: '원론적 정의:\n현재 프로그램에서 사용하는 내부 종합 위험도·상태점수입니다. 공식적인 국제 품질관리 표준지표가 아닙니다.\n\n합성수지 Batch 생산에서의 의미:\nCpk, Western Rule, Target 편차, 산포 및 이상치 등 여러 요소를 종합하여 현재 품질 상태를 빠르게 파악하기 위한 내부 보조지표입니다.\n\n현재 프로그램에서의 사용:\n기존 품질관리 화면과 이력 호환성을 위해 내부 종합지표로 사용됩니다. Smart Analysis의 Internal Risk Score와는 별개의 지표입니다.\n\n해석 방법:\n점수가 낮을수록 프로그램에서 관리가 필요한 위험 신호가 많다고 해석할 수 있으나, PSI만으로 제품 불량이나 원인을 확정하지 않습니다.', isVisible: true, order: 8 },
+            { name: 'TBI', category: '내부 지표', definition: '원론적 정의:\nTarget을 기준으로 현재 측정값이 어느 방향으로 얼마나 이격되어 있는지를 해당 방향의 허용거리로 정규화한 내부 지표입니다.\n\n합성수지 Batch 생산에서의 의미:\n제품마다 Target과 USL/LSL 간 거리가 달라도 현재 Batch가 Target에서 어느 방향으로 얼마나 치우쳤는지 상대적으로 파악하는 데 활용합니다.\n\n현재 프로그램에서의 사용:\nQuality Condition Trend 및 Smart Analysis의 핵심 Target 편향 지표로 사용합니다.\n\n해석 방법:\n0은 Target에 해당하며, +1은 USL 방향의 한계, -1은 LSL 방향의 한계에 해당합니다. 규격을 벗어나면 |TBI|가 1을 초과할 수 있습니다.', isVisible: true, order: 9 },
+            { name: 'Baseline', category: '내부 지표', definition: '원론적 정의:\n정상적인 과거 상태와 비교하기 위한 기준 데이터 집합입니다.\n\n합성수지 Batch 생산에서의 의미:\n동일 제품/항목의 과거 정상 Batch가 현재 Batch와 비교했을 때 평소 범위인지 판단하기 위한 기준입니다.\n\n현재 프로그램에서의 사용:\n충분한 과거 데이터가 확보된 경우 정상 패턴 비교에 활용합니다.\n\n해석 방법:\nBaseline이 없으면 장기 정상 상태 판단 신뢰도가 낮아지고 최근 변화 중심으로 분석합니다.', isVisible: true, order: 10 },
+            { name: 'Sudden Jump', category: '패턴', definition: '원론적 정의:\n직전 Batch와의 변화량이 해당 제품의 평소 Batch-to-Batch 변동성에 비해 비정상적으로 큰 급격한 변화 패턴입니다.\n\n합성수지 Batch 생산에서의 의미:\n특정 Batch에서 점도, 고형분, 산가 등의 값이 평소보다 갑자기 크게 변하는 상황을 탐지하는 데 활용합니다.\n\n현재 프로그램에서의 사용:\n직전 Batch와의 변화량을 Typical Variation과 비교하여 급격한 변화 여부를 판단합니다.\n\n해석 방법:\nSudden Jump는 원인 자체가 아니라 관찰된 데이터 패턴입니다. 원료 LOT, 배합·투입, 반응조건, 샘플링 및 측정 상태 등을 추가로 확인해야 합니다.', isVisible: true, order: 11 },
+            { name: 'Target Drift', category: '패턴', definition: '원론적 정의:\n여러 Batch에 걸쳐 측정값의 중심이 Target을 기준으로 일정 방향으로 이동하는 패턴입니다.\n\n합성수지 Batch 생산에서의 의미:\n점도, 산가, 고형분 등의 값이 여러 Batch에 걸쳐 Target보다 높은 방향 또는 낮은 방향으로 지속적으로 이동하는 상황을 탐지합니다.\n\n현재 프로그램에서의 사용:\n최근 3~5 Batch의 방향성, Target Bias 변화 및 과거 정상 Baseline과의 차이를 종합하여 판단합니다.\n\n해석 방법:\nDrift 자체는 특정 원인을 의미하지 않습니다. 원료 특성, 반응 온도·시간, 촉매, 혼합, 측정 조건 등의 원인 후보를 추가 확인합니다.', isVisible: true, order: 12 },
+            { name: 'Spread Increase', category: '패턴', definition: '원론적 정의:\n공정 변동 또는 산포가 과거보다 증가하는 현상입니다.\n\n합성수지 Batch 생산에서의 의미:\n동일 수지를 생산해도 Batch 간 편차가 점점 커지는 상태입니다.\n\n현재 프로그램에서의 사용:\n최근 5 Batch의 산포와 Baseline 또는 과거 변동성을 비교하는 데 활용합니다.\n\n해석 방법:\n평균 중심이 정상이어도 산포가 커지면 공정 안정성이 저하될 수 있습니다.', isVisible: true, order: 13 },
+            { name: 'Target Approach', category: '패턴', definition: '원론적 정의:\n측정값이 목표값보다 규격 한계 방향으로 접근하는 상태입니다.\n\n합성수지 Batch 생산에서의 의미:\n현재 규격 이탈은 아니지만 Target에서 멀어지고 있어 향후 Spec-Out 위험이 커질 수 있는 상태입니다.\n\n현재 프로그램에서의 사용:\nTBI가 임계 수준에 접근할 때 참고 패턴으로 사용합니다.\n\n해석 방법:\n현재 불량이라는 의미가 아니라 주의 및 모니터링이 필요한 상태입니다.', isVisible: true, order: 14 },
+            { name: 'Internal Risk Score', category: '내부 지표', definition: '원론적 정의:\n현재 프로그램에서 여러 이상징후를 종합해 내부적으로 표시하는 위험도 점수입니다.\n\n합성수지 Batch 생산에서의 의미:\nSpec-Out, Sudden Jump, Drift, Spread Increase, Target 편향 등을 종합해 QA가 현재 상태를 빠르게 파악하도록 지원합니다.\n\n현재 프로그램에서의 사용:\nAI 품질 변화 위험도를 0~100 범위로 표현합니다.\n\n해석 방법:\n공식 품질지표가 아니며 QA 의사결정을 지원하는 보조지표입니다.', isVisible: true, order: 15 }
+        ];
+      });
+
+      useEffect(() => {
+        localStorage.setItem('qualityAppTerms', JSON.stringify(qualityAppTerms));
+      }, [qualityAppTerms]);
+
+      const logAudit = (action, details) => {
+        const newLog = {
+          id: Date.now(),
+          timestamp: new Date().toISOString(),
+          userName: userName || 'Unknown',
+          clientId: clientId,
+          action,
+          ...details
+        };
+        setAuditLogs(prev => {
+            const nextLogs = [newLog, ...prev];
+            if (nextLogs.length > 2000) nextLogs.length = 2000;
+            return nextLogs;
+        });
+        return newLog;
+      };
+
+      const updateAndSync = async (updatedEntries, auditAction = null, auditDetails = null) => {
+        setEntries(updatedEntries);
+        let currentAuditLogs = auditLogs;
+        if (auditAction) {
+          const newLog = {
+            id: Date.now(),
+            timestamp: new Date().toISOString(),
+            userName: userName || 'Unknown',
+            clientId: clientId,
+            action: auditAction,
+            ...auditDetails
+          };
+          currentAuditLogs = [newLog, ...auditLogs].slice(0, 2000);
+          setAuditLogs(currentAuditLogs);
+        }
+        if (isConnected && canEdit && appSettings.autoSave) {
+          await writeDataToFile(fileHandle, updatedEntries, lockInfo, currentAuditLogs);
+        }
+      };
+const [entries, setEntries] = useState([]);
       const [expandedChart, setExpandedChart] = useState(null);
       const [chartZoom, setChartZoom] = useState({ refAreaLeft: '', refAreaRight: '', left: 'dataMin', right: 'dataMax' });
       const [showLines, setShowLines] = useState({ usl: true, lsl: true, target: true, ucl: true, lcl: true, cl: true });
@@ -848,7 +981,17 @@ ${decision}
               if (hl.includes('조치') || hl.includes('비고') || hl.includes('내용')) mapping.content = h;
               activePoints.forEach(p => { if (h.includes(p.name)) mapping.points[p.originalIndex] = h; });
             });
-            setExcelState(prev => ({ ...prev, isOpen: true, headers, data, mapping }));
+
+            const resins = new Set();
+            data.forEach(r => {
+                const rVal = r['수지명'] || r['제품명'] || r['제품'] || r['Grade'] || r['Resin'] || r['Product'] || r['Product Name'] || r['Resin Name'];
+                if (rVal) resins.add(rVal.toString().trim());
+            });
+            setExcelState(prev => ({
+              ...prev, isOpen: true, headers, data, mapping,
+              availableResins: Array.from(resins),
+              selectedResin: entry && entry.resinName && resins.has(entry.resinName) ? entry.resinName : (resins.size > 0 ? Array.from(resins)[0] : '')
+            }));
           }
         };
         reader.readAsBinaryString(file); e.target.value = null;
@@ -861,8 +1004,9 @@ ${decision}
         const activePoints = entry.points.map((p, i) => ({ ...p, originalIndex: i })).filter(p => p.name.trim() !== '');
         const parsedLogs = [];
 
-        data.forEach((row, index) => {
-          let parsedDate = parsePastedDate(String(row[mapping.date] || '')) || new Date().toISOString().split('T')[0];
+        filteredData.forEach((row, index) => {
+          let parsedDate = parsePastedDate(String(row[mapping.date] || ''));
+          if (!parsedDate) return; // skip if invalid date
           let lotNum = mapping.lotNumber ? String(row[mapping.lotNumber] || '').trim() : '';
           const valuesArr = Array(entry.points.length).fill('');
           activePoints.forEach(p => { if (mapping.points[p.originalIndex] && row[mapping.points[p.originalIndex]] !== undefined) valuesArr[p.originalIndex] = String(row[mapping.points[p.originalIndex]]).trim(); });
@@ -960,7 +1104,16 @@ ${decision}
                   if (data.settings) { setAppSettings(data.settings); localStorage.setItem('qualityAppSettingsV3', JSON.stringify(data.settings)); }
                   if (data.profiles) { setProductProfiles(data.profiles); localStorage.setItem('qualityAppProfiles', JSON.stringify(data.profiles)); }
                   if (data.histories) { setAnalysisHistories(data.histories); localStorage.setItem('qualityAppHistories', JSON.stringify(data.histories)); }
-                  if (isConnected && canEdit) writeDataToFile(fileHandle, data.entries || entries, lockInfo);
+
+                  if (isConnected && canEdit) {
+                      const backupLog = { id: Date.now(), timestamp: new Date().toISOString(), userName: userName || 'Unknown', clientId: clientId, action: 'BACKUP_RESTORE' };
+                      let restoredAuditLogs = data.auditLogs || auditLogs;
+                      restoredAuditLogs = [backupLog, ...restoredAuditLogs].slice(0, 2000);
+                      setAuditLogs(restoredAuditLogs);
+                      writeDataToFile(fileHandle, data.entries || entries, lockInfo, restoredAuditLogs);
+                  } else {
+                      setAuditLogs(data.auditLogs || []);
+                  }
                   showToast("백업 데이터 복원 완료");
               } catch (err) {
                   setModalConfig({ type: 'info', message: '유효하지 않은 백업 파일 형식입니다.' });
@@ -1009,19 +1162,13 @@ ${decision}
         if (currentLock.isEditing && currentLock.editorName === userName) setCanEdit(true); else setCanEdit(false);
       };
 
-      const writeDataToFile = async (handle, dataEntries, lockData) => {
-        const contentStr = JSON.stringify({ entries: dataEntries, lockInfo: lockData }, null, 2);
+      const writeDataToFile = async (handle, dataEntries, lockData, auditData = null) => {
+        const contentStr = JSON.stringify({ entries: dataEntries, lockInfo: lockData, auditLogs: auditData || auditLogs }, null, 2);
         if (isIframeFallback || !handle) { localStorage.setItem('quality_data_fallback', contentStr); return; }
         const writable = await handle.createWritable();
         await writable.write(contentStr); await writable.close();
       };
 
-      const updateAndSync = async (updatedEntries) => {
-        setEntries(updatedEntries);
-        if (isConnected && canEdit && appSettings.autoSave) {
-          await writeDataToFile(fileHandle, updatedEntries, lockInfo);
-        }
-      };
 
       const startEditing = async () => {
         let currentData = { entries, lockInfo };
@@ -1323,14 +1470,14 @@ ${decision}
       const handleCreate = () => {
         if (!newEntry.resinName || !newEntry.cause || !newEntry.points.some(p => p.name.trim() !== '')) return;
         const entry = { ...newEntry, id: Date.now(), status: '진행중', logs: [] };
-        updateAndSync([entry, ...entries]); setView('dashboard');
+        updateAndSync([entry, ...entries], 'CREATE', { productName: entry.resinName, recordId: entry.id, afterData: entry }); setView('dashboard');
         setNewEntry({ resinName: '', type: '부적합 대책', processProfile: appSettings.defaultProfile, cause: '', startDate: new Date().toISOString().split('T')[0], endDate: '', points: [{ name: '', lsl: '', target: '', usl: '' }, { name: '', lsl: '', target: '', usl: '' }] });
       };
 
       const handleAddLog = () => {
         if (newLog.values.every(v => v === '') && !newLog.content && (!newLog.images || newLog.images.length === 0)) { setModalConfig({ type: 'info', message: '최소 1개의 측정값, 내용 또는 사진을 등록하세요.' }); return; }
         const newLogWithEditor = { ...newLog, id: Date.now(), editorName: logEditorName || userName };
-        updateAndSync(entries.map(entry => entry.id === selectedId ? { ...entry, logs: [...entry.logs, newLogWithEditor] } : entry));
+        const curEntry = entries.find(e => e.id === selectedId); updateAndSync(entries.map(entry => entry.id === selectedId ? { ...entry, logs: [...entry.logs, newLogWithEditor] } : entry), 'UPDATE', { productName: curEntry?.resinName, recordId: curEntry?.id, lotNumber: newLogWithEditor.lotNumber, afterData: newLogWithEditor });
         const entry = entries.find(e => e.id === selectedId);
         const pointCount = entry && entry.points ? entry.points.length : 5;
         setNewLog({ date: new Date().toISOString().split('T')[0], lotNumber: '', values: Array(pointCount).fill(''), content: '', images: [] });
@@ -1339,9 +1486,9 @@ ${decision}
       const triggerAction = (type, targetId) => {
         let message = type === 'close' ? '종료하시겠습니까?' : type === 'delete' ? '삭제하시겠습니까?' : '재개하시겠습니까?';
         setModalConfig({ type: 'confirm', message, onConfirm: () => {
-            if (type === 'close') updateAndSync(entries.map(e => e.id === targetId ? { ...e, status: '종료' } : e));
-            else if (type === 'delete') { updateAndSync(entries.filter(e => e.id !== targetId)); if (selectedId === targetId) setView('dashboard'); }
-            else if (type === 'reopen') updateAndSync(entries.map(e => e.id === targetId ? { ...e, status: '진행중' } : e));
+            if (type === 'close') updateAndSync(entries.map(e => e.id === targetId ? { ...e, status: '종료' } : e), 'UPDATE', { recordId: targetId, afterData: { status: '종료' } });
+            else if (type === 'delete') { const delEntry = entries.find(e => e.id === targetId); updateAndSync(entries.filter(e => e.id !== targetId), 'DELETE', { recordId: targetId, beforeData: delEntry }); if (selectedId === targetId) setView('dashboard'); }
+            else if (type === 'reopen') updateAndSync(entries.map(e => e.id === targetId ? { ...e, status: '진행중' } : e), 'UPDATE', { recordId: targetId, afterData: { status: '진행중' } });
             setModalConfig({ type: null });
         }});
       };
@@ -1362,14 +1509,14 @@ ${decision}
         if (!editingLogData) return;
         if (editingLogData.values.every(v => v === '') && !editingLogData.content && (!editingLogData.images || editingLogData.images.length === 0)) { setModalConfig({ type: 'info', message: '내용 또는 사진을 입력하세요.' }); return; }
         const upData = { ...editingLogData };
-        updateAndSync(entries.map(entry => entry.id === entryId ? { ...entry, logs: entry.logs.map(l => l.id === editingLogId ? upData : l) } : entry));
+        const currentLog = entries.find(e => e.id === entryId)?.logs?.find(l => l.id === editingLogId); updateAndSync(entries.map(entry => entry.id === entryId ? { ...entry, logs: entry.logs.map(l => l.id === editingLogId ? upData : l) } : entry), 'UPDATE', { recordId: entryId, beforeData: currentLog, afterData: upData });
         setEditingLogId(null); setEditingLogData(null); showToast("기록 수정 완료");
       };
       const handleEditLogCancel = () => { setEditingLogId(null); setEditingLogData(null); };
       const handleDeleteLog = (entryId, logId) => {
         if (!canEdit) return;
         setModalConfig({ type: 'confirm', message: '기록을 삭제하시겠습니까?', onConfirm: () => {
-            updateAndSync(entries.map(entry => entry.id === entryId ? { ...entry, logs: entry.logs.filter(l => l.id !== logId) } : entry)); setModalConfig({ type: null }); showToast("삭제 완료");
+            const logToDelete = entries.find(e => e.id === entryId)?.logs?.find(l => l.id === logId); updateAndSync(entries.map(entry => entry.id === entryId ? { ...entry, logs: entry.logs.filter(l => l.id !== logId) } : entry), 'UPDATE', { recordId: entryId, beforeData: logToDelete, afterData: { deleted: true } }); setModalConfig({ type: null }); showToast("삭제 완료");
         }});
       };
 
@@ -1468,6 +1615,27 @@ ${decision}
         <div className="space-y-6 animate-in fade-in relative z-10">
           {entries.length > 0 && renderDashboardKPI()}
 
+
+          <div className="bg-white p-4 rounded-xl shadow-sm border border-indigo-100 mb-6">
+            <h3 className="font-bold text-indigo-800 mb-3 flex items-center gap-2"><span className="material-symbols-outlined icon-sm">menu_book</span> 품질관리 용어 가이드</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+              {qualityAppTerms.filter(t => t.isVisible).sort((a,b)=>a.order-b.order).map((term, idx) => (
+                <div key={idx} className="bg-gray-50 border border-gray-100 rounded-lg p-3 hover:shadow-md transition-shadow cursor-help group relative">
+                  <div className="flex justify-between items-center mb-1">
+                    <span className="font-bold text-indigo-700">{term.name}</span>
+                    <span className="text-[10px] bg-indigo-100 text-indigo-800 px-1.5 py-0.5 rounded">{term.category}</span>
+                  </div>
+                  <p className="text-xs text-gray-600 line-clamp-2">{term.definition.split('\n')[1] || term.definition}</p>
+
+                  {/* 툴팁 */}
+                  <div className="hidden group-hover:block absolute z-[100] top-full left-0 mt-2 w-72 bg-white border border-gray-200 shadow-xl rounded-lg p-4 text-xs text-gray-700 whitespace-pre-wrap max-h-80 overflow-y-auto">
+                     <div className="font-bold text-sm text-indigo-800 mb-2 border-b pb-1">{term.name}</div>
+                     {term.definition}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
           <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-2">
              <div className="flex items-center gap-4">
                  <h2 className="text-2xl font-black text-gray-800 flex items-center gap-2">품질 이력 현황판</h2>
@@ -1608,7 +1776,129 @@ ${decision}
           );
       };
 
-      const renderDetails = () => {
+
+        const renderQualityTrend = (logs, pointSpec, stats, n) => {
+            if (n === 0) return null;
+
+            const target = parseFloat(pointSpec.target);
+            if (isNaN(target)) return <div className="p-4 bg-gray-50 border rounded text-center text-sm text-gray-500">Target 값이 설정되지 않아 추세를 분석할 수 없습니다.</div>;
+
+            const tbiData = logs.map((l, i) => {
+                const tbi = calculateAsymmetricTBI(l.value, pointSpec);
+                const prev = i > 0 ? logs[i-1].value : null;
+                const delta = prev !== null ? l.value - prev : 0;
+                return { ...l, tbi, delta };
+            });
+
+            const recent5 = tbiData.slice(-5);
+            const validRecent5 = recent5.filter(d => d.tbi !== null && !isNaN(d.tbi));
+            const avgTbi5 = validRecent5.length > 0 ? validRecent5.reduce((sum, d) => sum + d.tbi, 0) / validRecent5.length : 0;
+
+            const lastData = tbiData[tbiData.length - 1];
+            const currentTBI = lastData.tbi || 0;
+            const currentDelta = lastData.delta || 0;
+
+            const recent5Vals = recent5.map(d => d.value).filter(v => typeof v === 'number' && !isNaN(v));
+            let sigma5 = 0;
+            if (recent5Vals.length > 1) {
+                const mean5 = recent5Vals.reduce((a, b) => a + b, 0) / recent5Vals.length;
+                sigma5 = Math.sqrt(recent5Vals.map(x => Math.pow(x - mean5, 2)).reduce((a, b) => a + b) / (recent5Vals.length - 1));
+            }
+
+            const maxAbsTBI = Math.max(1.5, ...tbiData.map(d => Math.abs(d.tbi || 0)));
+            const domain = [-Math.ceil(maxAbsTBI), Math.ceil(maxAbsTBI)];
+
+            return (
+                <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-200 mt-6 print-break-inside-avoid">
+                  <div className="flex justify-between items-center mb-4 border-b pb-2">
+                    <h3 className="font-extrabold text-lg text-indigo-900 flex items-center gap-2"><Icons.Activity/> Quality Condition Trend <span className="text-sm font-normal text-gray-500">| 품질 상태 추세</span></h3>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+                    <div className="bg-indigo-50 border border-indigo-100 p-4 rounded-lg text-center">
+                        <div className="text-xs text-gray-500 font-bold mb-1">현재 Batch TBI</div>
+                        <div className={`text-2xl font-black ${Math.abs(currentTBI) > 1 ? 'text-red-600' : Math.abs(currentTBI) > 0.8 ? 'text-orange-500' : 'text-indigo-700'}`}>
+                            {currentTBI.toFixed(3)}
+                        </div>
+                    </div>
+                    <div className="bg-blue-50 border border-blue-100 p-4 rounded-lg text-center">
+                        <div className="text-xs text-gray-500 font-bold mb-1">최근 5 Batch 평균 TBI</div>
+                        <div className="text-2xl font-black text-blue-700">{avgTbi5.toFixed(3)}</div>
+                    </div>
+                    <div className="bg-green-50 border border-green-100 p-4 rounded-lg text-center">
+                        <div className="text-xs text-gray-500 font-bold mb-1">최근 Batch Delta</div>
+                        <div className="text-2xl font-black text-green-700">{currentDelta > 0 ? '+' : ''}{currentDelta.toFixed(3)}</div>
+                    </div>
+                    <div className="bg-purple-50 border border-purple-100 p-4 rounded-lg text-center">
+                        <div className="text-xs text-gray-500 font-bold mb-1">최근 5 Batch Sigma</div>
+                        <div className="text-2xl font-black text-purple-700">{sigma5.toFixed(3)}</div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                      <div className="border border-gray-100 rounded-lg p-3 bg-gray-50">
+                          <h4 className="text-sm font-bold text-gray-700 mb-3 text-center">Target Bias Trend (TBI)</h4>
+                          <div className="h-64 w-full">
+                            <ResponsiveContainer>
+                                <ComposedChart data={tbiData} margin={{ top: 20, right: 30, left: 0, bottom: 20 }}>
+                                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E5E7EB" />
+                                    <XAxis dataKey="lotNumber" tick={{fontSize: 10}} stroke="#9CA3AF" tickMargin={10} />
+                                    <YAxis domain={domain} tick={{fontSize: 10}} stroke="#9CA3AF" />
+                                    <Tooltip content={({ active, payload, label }) => {
+                                        if (active && payload && payload.length) {
+                                            const d = payload[0].payload;
+                                            return (
+                                                <div className="bg-white p-3 shadow rounded border text-xs">
+                                                    <div className="font-bold border-b pb-1 mb-1">{d.date} {d.lotNumber ? `(LOT: ${d.lotNumber})` : ''}</div>
+                                                    <div>TBI: <span className="font-bold text-indigo-600">{d.tbi.toFixed(3)}</span></div>
+                                                    <div>Delta: <span className="font-bold text-green-600">{d.delta > 0 ? '+' : ''}{d.delta.toFixed(3)}</span></div>
+                                                </div>
+                                            );
+                                        }
+                                        return null;
+                                    }} />
+                                    <ReferenceLine y={0} stroke="#4F46E5" strokeWidth={2} strokeDasharray="5 5" label={{position: 'insideTopLeft', value: 'Target (0)', fill: '#4F46E5', fontSize: 10}} />
+                                    <ReferenceLine y={1} stroke="#EF4444" strokeWidth={1} label={{position: 'insideTopLeft', value: 'USL (+1)', fill: '#EF4444', fontSize: 10}} />
+                                    <ReferenceLine y={-1} stroke="#EF4444" strokeWidth={1} label={{position: 'insideBottomLeft', value: 'LSL (-1)', fill: '#EF4444', fontSize: 10}} />
+                                    <Line type="monotone" dataKey="tbi" stroke="#6366F1" strokeWidth={3} dot={{r: 4, fill: '#6366F1', strokeWidth: 2, stroke: '#fff'}} activeDot={{r: 6}} isAnimationActive={false} />
+                                </ComposedChart>
+                            </ResponsiveContainer>
+                          </div>
+                      </div>
+
+                      <div className="border border-gray-100 rounded-lg p-3 bg-gray-50">
+                          <h4 className="text-sm font-bold text-gray-700 mb-3 text-center">Batch 실측 분포</h4>
+                          <div className="h-64 w-full">
+                            <ResponsiveContainer>
+                                <ScatterChart margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
+                                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E5E7EB" />
+                                    <XAxis dataKey="lotNumber" type="category" allowDuplicatedCategory={false} tick={{fontSize: 10}} stroke="#9CA3AF" tickMargin={10} />
+                                    <YAxis dataKey="value" type="number" domain={['auto', 'auto']} tick={{fontSize: 10}} stroke="#9CA3AF" />
+                                    <Tooltip cursor={{strokeDasharray: '3 3'}} content={({ active, payload }) => {
+                                        if (active && payload && payload.length) {
+                                            const d = payload[0].payload;
+                                            return (
+                                                <div className="bg-white p-3 shadow rounded border text-xs">
+                                                    <div className="font-bold border-b pb-1 mb-1">{d.date} {d.lotNumber ? `(LOT: ${d.lotNumber})` : ''}</div>
+                                                    <div>측정값: <span className="font-bold">{d.value}</span></div>
+                                                </div>
+                                            );
+                                        }
+                                        return null;
+                                    }} />
+                                    {target !== null && !isNaN(target) && <ReferenceLine y={target} stroke="#4F46E5" strokeWidth={2} strokeDasharray="5 5" label={{position: 'insideTopLeft', value: 'Target', fill: '#4F46E5', fontSize: 10}} />}
+                                    {pointSpec.usl !== null && !isNaN(parseFloat(pointSpec.usl)) && <ReferenceLine y={parseFloat(pointSpec.usl)} stroke="#EF4444" strokeWidth={1} label={{position: 'insideTopLeft', value: 'USL', fill: '#EF4444', fontSize: 10}} />}
+                                    {pointSpec.lsl !== null && !isNaN(parseFloat(pointSpec.lsl)) && <ReferenceLine y={parseFloat(pointSpec.lsl)} stroke="#EF4444" strokeWidth={1} label={{position: 'insideBottomLeft', value: 'LSL', fill: '#EF4444', fontSize: 10}} />}
+                                    <Scatter data={tbiData} fill="#10B981" line={{stroke: '#D1D5DB', strokeWidth: 1}} isAnimationActive={false} />
+                                </ScatterChart>
+                            </ResponsiveContainer>
+                          </div>
+                      </div>
+                  </div>
+                </div>
+            );
+        };
+const renderDetails = () => {
         const entry = entries.find(e => e.id === selectedId);
         if (!entry) return null;
 
@@ -2342,6 +2632,41 @@ ${decision}
       };
 
       const renderExpandedChartModal = () => {
+        if (expandedChart === null || expandedChart === undefined || expandedChart < 0) return null;
+        const chartEntry = entries.find(e => e.id === selectedId);
+        if (!chartEntry || expandedChart >= (chartEntry.points?.length || 0)) return null;
+
+        const pointSpec = chartEntry.points[expandedChart];
+        if (!pointSpec || pointSpec.name.trim() === '') return null;
+
+        const renderGuide = (type) => {
+            let terms = [];
+            if (type === 'spc') terms = ['UCL / LCL', 'Moving Average', 'Western Rule', 'Target Drift', 'Sudden Jump'];
+            else if (type === 'cap') terms = ['Cpk', 'Cpm', 'Sigma', 'Spread Increase', 'Spec-Out'];
+            else if (type === 'dist') terms = ['Sigma', 'Spread Increase', 'Target Approach'];
+
+            const relevantTerms = qualityAppTerms.filter(t => terms.includes(t.name) && t.isVisible);
+            if (relevantTerms.length === 0) return null;
+
+            return (
+                <div className="bg-gray-50 border border-indigo-100 rounded-lg p-4 mt-4 shadow-sm text-sm">
+                    <h4 className="font-bold text-indigo-800 flex items-center gap-1 mb-2"><span className="material-symbols-outlined icon-sm">help</span> 그래프 해석 가이드</h4>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {relevantTerms.map((t, i) => (
+                            <div key={i} className="bg-white p-3 rounded shadow-sm border border-gray-100">
+                                <div className="font-bold text-indigo-700 mb-1">{t.name}</div>
+                                <div className="text-xs text-gray-600 whitespace-pre-wrap">{t.definition.split('\n\n').map((line, idx) => {
+                                    if (line.includes('합성수지 Batch 생산에서의 의미:')) return <div key={idx} className="mt-1 font-bold">{line.replace('합성수지 Batch 생산에서의 의미:', '')}</div>;
+                                    if (line.includes('해석 방법:')) return <div key={idx} className="mt-1 text-indigo-900 bg-indigo-50 p-1 rounded">{line.replace('해석 방법:', '👉')}</div>;
+                                    return <div key={idx} className="mt-0.5">{line}</div>;
+                                })}</div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            );
+        };
+
         if (!expandedChart) return null;
         const entry = entries.find(e => e.id === selectedId);
         if (!entry) return null;
