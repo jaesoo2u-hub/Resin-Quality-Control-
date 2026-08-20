@@ -48,6 +48,7 @@
   <script src="https://unpkg.com/prop-types@15.8.1/prop-types.min.js"></script>
   <script src="https://unpkg.com/recharts@2.1.9/umd/Recharts.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 </head>
 <body class="bg-transparent font-sans text-gray-800">
   
@@ -1764,6 +1765,28 @@ ${aiConclusion}
             setModalConfig({ type: 'ai_analysis_result', message: report });
         };
 
+        const handleDownloadPDF = () => {
+            if (!aiAnalysis) {
+                showToast("스마트 분석을 먼저 실행하여 리포트를 생성해주세요.");
+                return;
+            }
+            const element = document.getElementById('ai-report-print-area');
+            if (element) {
+                element.style.display = 'block';
+                const opt = {
+                    margin:       10,
+                    filename:     `${entry.resinName}_AI_공정_진단_리포트.pdf`,
+                    image:        { type: 'jpeg', quality: 0.98 },
+                    html2canvas:  { scale: 2 },
+                    jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
+                };
+                window.html2pdf().set(opt).from(element).save().finally(() => {
+                    element.style.display = 'none';
+                    showToast("PDF 다운로드가 완료되었습니다.");
+                });
+            }
+        };
+
         const saveCurrentAiReport = () => {
             if(!aiAnalysis) return;
             const newHistory = {
@@ -1989,6 +2012,7 @@ ${aiConclusion}
                            <button onClick={handlePrint} className="text-xs bg-gray-100 text-gray-700 border border-gray-300 px-3 py-1.5 rounded-full hover:bg-gray-200 flex items-center gap-1 font-bold shadow-sm"><Icons.Printer/> 인쇄</button>
                            <button onClick={exportToExcel} className="text-xs bg-green-50 text-green-700 border border-green-200 px-3 py-1.5 rounded-full hover:bg-green-100 flex items-center gap-1 font-bold shadow-sm"><Icons.FileSpreadsheet/> 엑셀</button>
                            <button onClick={handleOpenAiModal} disabled={isAiLoading} className={`text-xs px-4 py-1.5 rounded-full flex items-center gap-1 font-black shadow-sm transition-colors ${isAiLoading ? 'bg-gray-400 cursor-not-allowed text-white' : 'bg-indigo-600 text-white hover:bg-indigo-700 active:scale-95'}`}><Icons.Sparkles/> 스마트 분석</button>
+                           <button onClick={handleDownloadPDF} disabled={isAiLoading} className={`text-xs px-4 py-1.5 rounded-full flex items-center gap-1 font-black shadow-sm transition-colors ${isAiLoading ? 'bg-gray-400 cursor-not-allowed text-white' : 'bg-indigo-600 text-white hover:bg-indigo-700 active:scale-95'}`}><Icons.FileText/> PDF 보고서 다운로드</button>
                         </div>
                       </div>
 
@@ -2197,7 +2221,7 @@ ${aiConclusion}
             </div>
             
             {/* AI 리포트 인쇄 전용 (화면에는 미표시) */}
-            <div className="print-only hidden p-5 bg-white border border-gray-200 rounded-xl mt-6">
+            <div id="ai-report-print-area" className="print-only hidden p-5 bg-white border border-gray-200 rounded-xl mt-6">
                 <h3 className="font-extrabold text-xl mb-3 flex items-center gap-2"><Icons.Sparkles/> 최근 AI 공정 진단 결과 요약</h3>
                 <div className="text-sm leading-relaxed whitespace-pre-wrap font-mono text-gray-800 bg-gray-50 p-4 rounded-lg border">
                    {aiAnalysis || "AI 분석 이력이 없습니다. 스마트 분석 버튼을 눌러 리포트를 생성하세요."}
