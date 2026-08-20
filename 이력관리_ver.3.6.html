@@ -1,70 +1,8 @@
-
-              <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 mt-6">
-                <div className="flex justify-between items-center mb-4">
-                    <h3 className="font-bold text-lg text-indigo-700 flex items-center gap-2"><Icons.History/> Audit Log (감사 로그)</h3>
-                    <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded">총 {auditLogs.length}건 기록</span>
-                </div>
-                <div className="max-h-60 overflow-y-auto border border-gray-200 rounded-lg bg-gray-50 p-2">
-                  {auditLogs.length === 0 ? (
-                    <div className="text-center text-sm text-gray-500 py-10">기록된 작업이 없습니다.</div>
-                  ) : (
-                    <div className="space-y-2">
-                      {auditLogs.map((log) => (
-                        <div key={log.id} className="bg-white p-3 rounded shadow-sm border border-gray-100 text-xs">
-                          <div className="flex justify-between items-center mb-1 border-b pb-1">
-                            <span className="font-bold text-indigo-600">{log.action}</span>
-                            <span className="text-gray-400">{new Date(log.timestamp).toLocaleString()}</span>
-                          </div>
-                          <div className="grid grid-cols-2 gap-2 text-gray-600">
-                            <div><span className="font-bold">User:</span> {log.userName}</div>
-                            <div className="truncate"><span className="font-bold">Client:</span> {log.clientId}</div>
-                            {log.productName && <div><span className="font-bold">제품:</span> {log.productName}</div>}
-                            {log.lotNumber && <div><span className="font-bold">LOT:</span> {log.lotNumber}</div>}
-                          </div>
-                          {log.beforeData && (
-                            <div className="mt-2 p-1.5 bg-red-50 rounded text-red-700 max-h-16 overflow-y-auto whitespace-pre-wrap">
-                              <span className="font-bold">변경 전:</span> {JSON.stringify(log.beforeData)}
-                            </div>
-                          )}
-                          {log.afterData && (
-                            <div className="mt-1 p-1.5 bg-blue-50 rounded text-blue-700 max-h-16 overflow-y-auto whitespace-pre-wrap">
-                              <span className="font-bold">변경 후:</span> {JSON.stringify(log.afterData)}
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 mt-6">
-                <h3 className="font-bold text-lg mb-4 text-indigo-700 flex items-center gap-2"><span className="material-symbols-outlined">book</span> 품질관리 용어 가이드 편집</h3>
-                <div className="space-y-3 max-h-64 overflow-y-auto border border-gray-200 rounded-lg p-3 bg-gray-50">
-                  {qualityAppTerms.sort((a,b)=>a.order-b.order).map((term, i) => (
-                    <div key={term.name} className="bg-white p-3 rounded shadow-sm border border-gray-100">
-                      <div className="flex justify-between items-center mb-2">
-                        <div className="font-bold text-indigo-800">{term.name} <span className="text-xs font-normal text-gray-500 bg-gray-100 px-1 rounded ml-1">{term.category}</span></div>
-                        <div className="flex items-center gap-2">
-                           <label className="text-xs flex items-center gap-1 cursor-pointer">
-                             <input type="checkbox" checked={term.isVisible} onChange={(e) => {
-                               const newTerms = [...qualityAppTerms]; newTerms[i].isVisible = e.target.checked; setQualityAppTerms(newTerms);
-                             }} className="accent-indigo-600" /> 표시
-                           </label>
-                           <input type="number" className="w-12 border p-1 text-xs rounded" value={term.order} onChange={(e) => {
-                               const newTerms = [...qualityAppTerms]; newTerms[i].order = parseInt(e.target.value) || 0; setQualityAppTerms(newTerms);
-                           }} title="정렬 순서" />
-                        </div>
-                      </div>
-                      <textarea className="w-full text-xs border p-2 rounded h-20 outline-none focus:ring-1 focus:ring-indigo-500" value={term.definition} onChange={(e) => {
-                          const newTerms = [...qualityAppTerms]; newTerms[i].definition = e.target.value; setQualityAppTerms(newTerms);
-                      }} />
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-<h3 className="font-bold text-lg mb-4 text-indigo-700 flex items-center gap-2"><Icons.Database/> 데이터 백업 및 복원</h3>ce-width, initial-scale=1.0">
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>합성수지 품질 이력 관리 (V3 + 사진 첨부)</title>
 
   <script src="https://cdn.tailwindcss.com"></script>
@@ -998,22 +936,13 @@ const [entries, setEntries] = useState([]);
       };
 
       const handleImportExcelData = (importMode) => {
-        const { data, mapping, duplicateCriteria, selectedResin } = excelState;
+        const { data, mapping, duplicateCriteria } = excelState;
         if (!mapping.date) { showToast("측정일(Date) 매핑은 필수입니다."); return; }
         const entry = entries.find(en => en.id === selectedId);
         const activePoints = entry.points.map((p, i) => ({ ...p, originalIndex: i })).filter(p => p.name.trim() !== '');
-
-        let filteredData = data;
-        if (selectedResin) {
-            filteredData = data.filter(r => {
-                const rVal = r['수지명'] || r['제품명'] || r['제품'] || r['Grade'] || r['Resin'] || r['Product'] || r['Product Name'] || r['Resin Name'];
-                return rVal && rVal.toString().trim() === selectedResin;
-            });
-        }
-
         const parsedLogs = [];
 
-        filteredData.forEach((row, index) => {
+        data.forEach((row, index) => {
           let parsedDate = parsePastedDate(String(row[mapping.date] || ''));
           if (!parsedDate) return; // skip if invalid date
           let lotNum = mapping.lotNumber ? String(row[mapping.lotNumber] || '').trim() : '';
@@ -1330,7 +1259,72 @@ const [entries, setEntries] = useState([]);
                 </div>
               </div>
 
-              <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 flex flex-col gap-4">
+
+              <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 mt-6 mb-6">
+                <div className="flex justify-between items-center mb-4">
+                    <h3 className="font-bold text-lg text-indigo-700 flex items-center gap-2"><Icons.History/> Audit Log (감사 로그)</h3>
+                    <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded">총 {auditLogs.length}건 기록</span>
+                </div>
+                <div className="max-h-60 overflow-y-auto border border-gray-200 rounded-lg bg-gray-50 p-2">
+                  {auditLogs.length === 0 ? (
+                    <div className="text-center text-sm text-gray-500 py-10">기록된 작업이 없습니다.</div>
+                  ) : (
+                    <div className="space-y-2">
+                      {auditLogs.map((log) => (
+                        <div key={log.id} className="bg-white p-3 rounded shadow-sm border border-gray-100 text-xs">
+                          <div className="flex justify-between items-center mb-1 border-b pb-1">
+                            <span className="font-bold text-indigo-600">{log.action}</span>
+                            <span className="text-gray-400">{new Date(log.timestamp).toLocaleString()}</span>
+                          </div>
+                          <div className="grid grid-cols-2 gap-2 text-gray-600">
+                            <div><span className="font-bold">User:</span> {log.userName}</div>
+                            <div className="truncate"><span className="font-bold">Client:</span> {log.clientId}</div>
+                            {log.productName && <div><span className="font-bold">제품:</span> {log.productName}</div>}
+                            {log.lotNumber && <div><span className="font-bold">LOT:</span> {log.lotNumber}</div>}
+                          </div>
+                          {log.beforeData && (
+                            <div className="mt-2 p-1.5 bg-red-50 rounded text-red-700 max-h-16 overflow-y-auto whitespace-pre-wrap">
+                              <span className="font-bold">변경 전:</span> {JSON.stringify(log.beforeData)}
+                            </div>
+                          )}
+                          {log.afterData && (
+                            <div className="mt-1 p-1.5 bg-blue-50 rounded text-blue-700 max-h-16 overflow-y-auto whitespace-pre-wrap">
+                              <span className="font-bold">변경 후:</span> {JSON.stringify(log.afterData)}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 mt-6 mb-6">
+                <h3 className="font-bold text-lg mb-4 text-indigo-700 flex items-center gap-2"><span className="material-symbols-outlined">book</span> 품질관리 용어 가이드 편집</h3>
+                <div className="space-y-3 max-h-64 overflow-y-auto border border-gray-200 rounded-lg p-3 bg-gray-50">
+                  {qualityAppTerms.sort((a,b)=>a.order-b.order).map((term, i) => (
+                    <div key={term.name} className="bg-white p-3 rounded shadow-sm border border-gray-100">
+                      <div className="flex justify-between items-center mb-2">
+                        <div className="font-bold text-indigo-800">{term.name} <span className="text-xs font-normal text-gray-500 bg-gray-100 px-1 rounded ml-1">{term.category}</span></div>
+                        <div className="flex items-center gap-2">
+                           <label className="text-xs flex items-center gap-1 cursor-pointer">
+                             <input type="checkbox" checked={term.isVisible} onChange={(e) => {
+                               const newTerms = [...qualityAppTerms]; newTerms[i].isVisible = e.target.checked; setQualityAppTerms(newTerms);
+                             }} className="accent-indigo-600" /> 표시
+                           </label>
+                           <input type="number" className="w-12 border p-1 text-xs rounded" value={term.order} onChange={(e) => {
+                               const newTerms = [...qualityAppTerms]; newTerms[i].order = parseInt(e.target.value) || 0; setQualityAppTerms(newTerms);
+                           }} title="정렬 순서" />
+                        </div>
+                      </div>
+                      <textarea className="w-full text-xs border p-2 rounded h-20 outline-none focus:ring-1 focus:ring-indigo-500" value={term.definition} onChange={(e) => {
+                          const newTerms = [...qualityAppTerms]; newTerms[i].definition = e.target.value; setQualityAppTerms(newTerms);
+                      }} />
+                    </div>
+                  ))}
+                </div>
+              </div>
+<div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 flex flex-col gap-4">
                 <h3 className="font-bold text-lg text-gray-800 flex items-center gap-2"><span className="material-symbols-outlined">save</span> 데이터 백업 및 복원</h3>
                 <p className="text-xs text-gray-500">현재 입력된 모든 데이터, 설정, 프로파일, 이력을 백업하거나 기존 백업 파일을 복원합니다.</p>
                 <div className="flex gap-2">
@@ -2543,12 +2537,7 @@ const renderDetails = () => {
               </div>
               <div className="p-6 space-y-6">
                 <div className="text-sm text-gray-600 bg-indigo-50 p-4 rounded-lg border border-indigo-100">
-                  <p>업로드한 엑셀 파일에서 <b>총 {excelState.data.length}건</b>의 행이 발견되었습니다.
-                  {excelState.selectedResin && <span>(선택된 수지 '{excelState.selectedResin}' 필터 적용 후: <b>{excelState.data.filter(r => {
-                      const rVal = r['수지명'] || r['제품명'] || r['제품'] || r['Grade'] || r['Resin'] || r['Product'] || r['Product Name'] || r['Resin Name'];
-                      return rVal && rVal.toString().trim() === excelState.selectedResin;
-                  }).length}건</b>)</span>}
-                  </p>
+                  <p>업로드한 엑셀 파일에서 <b>총 {excelState.data.length}건</b>의 행이 발견되었습니다.</p>
                   <p className="mt-1">시스템의 각 입력 필드와 엑셀의 헤더(열 이름)를 알맞게 짝지어주세요.</p>
                 </div>
                 <div className="grid grid-cols-2 gap-x-6 gap-y-4">
